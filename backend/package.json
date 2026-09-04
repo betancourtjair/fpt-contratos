@@ -1,0 +1,22 @@
+{
+  "name": "fpt-contratos-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Backend de la plataforma de gestión contractual (CLM) de Fitness Para Todos (FPT)",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "seed": "node prisma/seed.js"
+  },
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-async-errors": "^3.1.1",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1",
+    "pg": "^8.12.0"
+  }
+}

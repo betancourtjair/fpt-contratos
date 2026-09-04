@@ -1,0 +1,205 @@
+// FPT Contratos - Plataforma de Gestión Contractual (estilo Webdox)
+// Esquema de datos principal.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RolUsuario {
+  super_admin
+  admin
+  juridico
+  aprobador
+  solicitante
+  lectura
+}
+
+enum EstatusContrato {
+  borrador
+  en_revision
+  en_autorizacion
+  rechazado
+  autorizado
+  activo
+  por_vencer
+  vencido
+  cancelado
+}
+
+enum DecisionAprobacion {
+  pendiente
+  aprobado
+  rechazado
+  omitido
+}
+
+enum CategoriaDocumento {
+  borrador
+  version_firmada
+  anexo
+  evidencia
+  otro
+}
+
+model Usuario {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  nombre        String
+  passwordHash  String
+  rol           RolUsuario @default(solicitante)
+  area          String?
+  activo        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  contratosSolicitados Contrato[]            @relation("SolicitadoPor")
+  aprobaciones         ContratoAprobacion[]   @relation("Aprobador")
+  documentosSubidos    ContratoDocumento[]    @relation("SubidoPor")
+  auditLogs            AuditLog[]
+  pasosPorUsuario      FlujoPaso[]            @relation("AprobadorEspecifico")
+
+  @@map("usuarios")
+}
+
+model TipoContrato {
+  id          String   @id @default(uuid())
+  nombre      String   @unique
+  descripcion String?
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  contratos         Contrato[]
+  plantillasFlujo   FlujoPlantilla[]
+
+  @@map("tipos_contrato")
+}
+
+// Plantilla de flujo de autorización multi-nivel, configurable por tipo de contrato.
+// Si tipoContratoId es null, es la plantilla "default" (aplica a cualquier tipo que no tenga una propia).
+model FlujoPlantilla {
+  id             String   @id @default(uuid())
+  nombre         String
+  tipoContratoId String?
+  activo         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  tipoContrato TipoContrato? @relation(fields: [tipoContratoId], references: [id])
+  pasos        FlujoPaso[]
+  contratos    Contrato[]
+
+  @@map("flujo_plantillas")
+}
+
+// Cada paso de una plantilla. El aprobador puede definirse por ROL (cualquier usuario con ese rol
+// puede resolver) o por usuario específico. Condiciones opcionales por monto para armar flujos
+// tipo "si el contrato es mayor a $X, agrega aprobación de Dirección".
+model FlujoPaso {
+  id                  String      @id @default(uuid())
+  plantillaId         String
+  orden               Int
+  nombre              String
+  rolAprobador        RolUsuario?
+  aprobadorId         String?
+  montoMinimo         Decimal?    @db.Decimal(14, 2)
+  montoMaximo         Decimal?    @db.Decimal(14, 2)
+  obligatorio         Boolean     @default(true)
+
+  plantilla  FlujoPlantilla @relation(fields: [plantillaId], references: [id], onDelete: Cascade)
+  aprobador  Usuario?       @relation("AprobadorEspecifico", fields: [aprobadorId], references: [id])
+
+  @@unique([plantillaId, orden])
+  @@map("flujo_pasos")
+}
+
+model Contrato {
+  id                     String            @id @default(uuid())
+  folio                  String            @unique
+  titulo                 String
+  descripcion            String?
+  tipoContratoId         String
+  parte                  String            // Entidad de FPT que contrata (ej. sucursal, razón social)
+  contraparteNombre      String
+  contraparteRFC         String?
+  contraparteContacto    String?
+  contraparteEmail       String?
+  monto                  Decimal?          @db.Decimal(14, 2)
+  moneda                 String            @default("MXN")
+  fechaInicio            DateTime?
+  fechaFin               DateTime?
+  renovacionAutomatica   Boolean           @default(false)
+  diasAvisoVencimiento   Int               @default(30)
+  estatus                EstatusContrato   @default(borrador)
+
+  solicitadoPorId        String
+  plantillaFlujoId       String?
+  pasoActualOrden        Int?
+
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
+
+  tipoContrato   TipoContrato     @relation(fields: [tipoContratoId], references: [id])
+  solicitadoPor  Usuario          @relation("SolicitadoPor", fields: [solicitadoPorId], references: [id])
+  plantillaFlujo FlujoPlantilla?  @relation(fields: [plantillaFlujoId], references: [id])
+
+  aprobaciones ContratoAprobacion[]
+  documentos   ContratoDocumento[]
+  auditLogs    AuditLog[]
+
+  @@map("contratos")
+}
+
+// Instancia de aprobación generada a partir de la plantilla al momento de enviar a autorización.
+model ContratoAprobacion {
+  id            String              @id @default(uuid())
+  contratoId    String
+  orden         Int
+  nombrePaso    String
+  aprobadorId   String?
+  rolRequerido  RolUsuario?
+  decision      DecisionAprobacion  @default(pendiente)
+  comentarios   String?
+  decididoAt    DateTime?
+  createdAt     DateTime            @default(now())
+
+  contrato  Contrato @relation(fields: [contratoId], references: [id], onDelete: Cascade)
+  aprobador Usuario? @relation("Aprobador", fields: [aprobadorId], references: [id])
+
+  @@unique([contratoId, orden])
+  @@map("contrato_aprobaciones")
+}
+
+model ContratoDocumento {
+  id            String             @id @default(uuid())
+  contratoId    String
+  nombreArchivo String
+  rutaArchivo   String
+  version       Int                @default(1)
+  categoria     CategoriaDocumento @default(borrador)
+  subidoPorId   String
+  createdAt     DateTime           @default(now())
+
+  contrato  Contrato @relation(fields: [contratoId], references: [id], onDelete: Cascade)
+  subidoPor Usuario  @relation("SubidoPor", fields: [subidoPorId], references: [id])
+
+  @@map("contrato_documentos")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  contratoId String?
+  usuarioId  String?
+  accion     String
+  detalle    String?
+  createdAt  DateTime @default(now())
+
+  contrato Contrato? @relation(fields: [contratoId], references: [id])
+  usuario  Usuario?  @relation(fields: [usuarioId], references: [id])
+
+  @@map("audit_logs")
+}

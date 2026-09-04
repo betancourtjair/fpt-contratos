@@ -1,0 +1,57 @@
+:root {
+  /* Paleta FPT — morada */
+  --fpt-purple-900: #2e1065;
+  --fpt-purple-800: #3b0f7a;
+  --fpt-purple-700: #4c1d95;
+  --fpt-purple-600: #6d28d9;
+  --fpt-purple-500: #7c3aed;
+  --fpt-purple-400: #9061f9;
+  --fpt-purple-200: #ddd0fb;
+  --fpt-purple-100: #ede9fe;
+  --fpt-purple-50: #f6f4ff;
+
+  --color-bg: #f5f6fa;
+  --color-surface: #ffffff;
+  --color-border: #e3e2ec;
+  --color-text: #221c35;
+  --color-text-muted: #6b6680;
+  --color-text-soft: #8b869c;
+
+  --color-primary: var(--fpt-purple-600);
+  --color-primary-hover: var(--fpt-purple-700);
+  --color-primary-soft: var(--fpt-purple-100);
+
+  --color-danger: #d7263d;
+  --color-danger-soft: #fde8ea;
+  --color-success: #157a4a;
+  --color-success-soft: #e2f6ec;
+  --color-warning: #b3690b;
+  --color-warning-soft: #fdf0dd;
+  --color-info: #1d63b0;
+  --color-info-soft: #e5f0fc;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  --shadow-sm: 0 1px 2px rgba(30, 20, 60, 0.06);
+  --shadow-md: 0 4px 16px rgba(30, 20, 60, 0.08);
+  --shadow-lg: 0 12px 32px rgba(30, 20, 60, 0.14);
+
+  --font-heading: 'Barlow Condensed', 'Arial Narrow', sans-serif;
+  --font-body: 'Open Sans', system-ui, -apple-system, sans-serif;
+
+  --sidebar-width: 240px;
+  --header-height: 64px;
+}
+
+/* Colores por estatus de contrato */
+.badge-borrador { --badge-fg: #55506b; --badge-bg: #eceafb; }
+.badge-en_revision { --badge-fg: #1d63b0; --badge-bg: #e5f0fc; }
+.badge-en_autorizacion { --badge-fg: #7c3aed; --badge-bg: #ede9fe; }
+.badge-rechazado { --badge-fg: #b3131f; --badge-bg: #fde3e5; }
+.badge-autorizado { --badge-fg: #157a4a; --badge-bg: #e2f6ec; }
+.badge-activo { --badge-fg: #0d7a63; --badge-bg: #ddf5ee; }
+.badge-por_vencer { --badge-fg: #b3690b; --badge-bg: #fdf0dd; }
+.badge-vencido { --badge-fg: #99101a; --badge-bg: #fadadd; }
+.badge-cancelado { --badge-fg: #56506a; --badge-bg: #e7e5ee; }
