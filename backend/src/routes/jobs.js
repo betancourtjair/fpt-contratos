@@ -6,8 +6,9 @@ const { revisarVencimientos } = require('../utils/vencimientos');
 const router = express.Router();
 
 // POST /api/jobs/revisar-vencimientos
-// Pensado para ser llamado por un cron externo (ej. Render Cron Job) usando un JWT de un
-// usuario admin/super_admin. No hay un cron real corriendo dentro de este proceso.
+// Esta revisión ya corre sola (ver src/jobs/scheduler.js: al arrancar el servidor y todos
+// los días a las 07:00). Este endpoint queda disponible para forzar una revisión inmediata
+// o para pruebas, protegido para admin/super_admin.
 router.post(
   '/revisar-vencimientos',
   requireAuth,

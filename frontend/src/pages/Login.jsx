@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
+import fptLogo from '../assets/fpt-logo-full.png';
 
 export default function Login() {
   const { login } = useAuth();
@@ -35,7 +36,9 @@ export default function Login() {
     <div className="login-screen">
       <div className="login-card">
         <div className="login-brand">
-          <div className="login-brand-mark">FPT</div>
+          <div className="login-brand-mark">
+            <img src={fptLogo} alt="Fitness Para Todos" />
+          </div>
           <h1>FPT Contratos</h1>
           <p>Gestión contractual · Fitness Para Todos</p>
         </div>

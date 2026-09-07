@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext.jsx';
+import fptLogoMark from '../assets/fpt-logo-mark.png';
 
 const ROL_LABELS = {
   super_admin: 'Super admin',
@@ -25,7 +26,9 @@ export default function Layout() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <div className="sidebar-brand-mark">FPT</div>
+          <div className="sidebar-brand-mark">
+            <img src={fptLogoMark} alt="Fitness Para Todos" />
+          </div>
           <div className="sidebar-brand-text">
             Contratos
             <small>Fitness Para Todos</small>

@@ -1,6 +1,6 @@
-// Tarea de vencimientos: no es un cron real dentro del proceso, sino una función que se
-// dispara manualmente vía POST /api/jobs/revisar-vencimientos (pensado para ser llamado por
-// un cron externo, ej. un Cron Job de Render).
+// Tarea de vencimientos. Se ejecuta sola todos los días vía el programador interno
+// (ver src/jobs/scheduler.js) y también puede dispararse a mano vía
+// POST /api/jobs/revisar-vencimientos (útil para pruebas o para forzar una revisión).
 //
 // Marca:
 //   - 'activo' o 'por_vencer' con fecha_fin ya pasada -> 'vencido'

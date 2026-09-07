@@ -16,6 +16,7 @@ const contratosRoutes = require('./routes/contratos');
 const documentosRoutes = require('./routes/documentos');
 const dashboardRoutes = require('./routes/dashboard');
 const jobsRoutes = require('./routes/jobs');
+const { iniciarProgramador } = require('./jobs/scheduler');
 
 const app = express();
 
@@ -83,6 +84,7 @@ const PORT = process.env.PORT || 4000;
 if (require.main === module) {
   const server = app.listen(PORT, () => {
     console.log(`FPT Contratos backend escuchando en http://localhost:${PORT}`);
+    iniciarProgramador();
   });
 
   const apagar = async (señal) => {

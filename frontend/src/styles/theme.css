@@ -1,14 +1,14 @@
 :root {
-  /* Paleta FPT — morada */
-  --fpt-purple-900: #2e1065;
-  --fpt-purple-800: #3b0f7a;
-  --fpt-purple-700: #4c1d95;
-  --fpt-purple-600: #6d28d9;
-  --fpt-purple-500: #7c3aed;
-  --fpt-purple-400: #9061f9;
-  --fpt-purple-200: #ddd0fb;
-  --fpt-purple-100: #ede9fe;
-  --fpt-purple-50: #f6f4ff;
+  /* Paleta FPT — morada oficial, tomada de fpt.com.mx y del logo de la marca */
+  --fpt-purple-900: #2a0f42;
+  --fpt-purple-800: #3c1053; /* morado oscuro de marca (fpt.com.mx) */
+  --fpt-purple-700: #4a1c68;
+  --fpt-purple-600: #592c82; /* morado primario de marca (fpt.com.mx) */
+  --fpt-purple-500: #772583; /* acento de marca (usado en "FITNESS" del logo) */
+  --fpt-purple-400: #8f54c5;
+  --fpt-purple-200: #cdb3e5;
+  --fpt-purple-100: #e6d9f2;
+  --fpt-purple-50: #f6f2fa;
 
   --color-bg: #f5f6fa;
   --color-surface: #ffffff;
@@ -48,7 +48,7 @@
 /* Colores por estatus de contrato */
 .badge-borrador { --badge-fg: #55506b; --badge-bg: #eceafb; }
 .badge-en_revision { --badge-fg: #1d63b0; --badge-bg: #e5f0fc; }
-.badge-en_autorizacion { --badge-fg: #7c3aed; --badge-bg: #ede9fe; }
+.badge-en_autorizacion { --badge-fg: #772583; --badge-bg: #f2e5f5; }
 .badge-rechazado { --badge-fg: #b3131f; --badge-bg: #fde3e5; }
 .badge-autorizado { --badge-fg: #157a4a; --badge-bg: #e2f6ec; }
 .badge-activo { --badge-fg: #0d7a63; --badge-bg: #ddf5ee; }
