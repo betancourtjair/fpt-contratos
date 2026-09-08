@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api, unwrap } from '../../api.js';
 import Spinner from '../../components/Spinner.jsx';
 
-const VACIO = { id: null, nombre: '', descripcion: '', activo: true };
+const VACIO = { id: null, nombre: '', descripcion: '', activo: true, esFranquicia: false };
 
 export default function TiposContrato() {
   const [tipos, setTipos] = useState([]);
@@ -38,7 +38,13 @@ export default function TiposContrato() {
   }
 
   function abrirEdicion(tipo) {
-    setValores({ id: tipo.id, nombre: tipo.nombre, descripcion: tipo.descripcion || '', activo: tipo.activo !== false });
+    setValores({
+      id: tipo.id,
+      nombre: tipo.nombre,
+      descripcion: tipo.descripcion || '',
+      activo: tipo.activo !== false,
+      esFranquicia: !!tipo.esFranquicia,
+    });
     setErrorForm('');
     setFormAbierto(true);
   }
@@ -57,12 +63,14 @@ export default function TiposContrato() {
           nombre: valores.nombre,
           descripcion: valores.descripcion,
           activo: valores.activo,
+          esFranquicia: valores.esFranquicia,
         });
       } else {
         await api.post('/tipos-contrato', {
           nombre: valores.nombre,
           descripcion: valores.descripcion,
           activo: valores.activo,
+          esFranquicia: valores.esFranquicia,
         });
       }
       setFormAbierto(false);
@@ -126,6 +134,17 @@ export default function TiposContrato() {
               />
               <label htmlFor="activo" style={{ marginBottom: 0 }}>Activo</label>
             </div>
+            <div className="field checkbox-row">
+              <input
+                id="esFranquicia"
+                type="checkbox"
+                checked={valores.esFranquicia}
+                onChange={(e) => setValores({ ...valores, esFranquicia: e.target.checked })}
+              />
+              <label htmlFor="esFranquicia" style={{ marginBottom: 0 }}>
+                Es contrato de franquicia (activa sus campos y notificaciones especiales)
+              </label>
+            </div>
             <div className="form-actions">
               <button type="submit" className="btn btn-primary" disabled={guardando}>
                 {guardando ? 'Guardando…' : 'Guardar'}
@@ -147,18 +166,20 @@ export default function TiposContrato() {
               <tr>
                 <th>Nombre</th>
                 <th>Descripción</th>
+                <th>Franquicia</th>
                 <th>Estatus</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
               {tipos.length === 0 ? (
-                <tr><td colSpan={4} className="table-empty">No hay tipos de contrato registrados.</td></tr>
+                <tr><td colSpan={5} className="table-empty">No hay tipos de contrato registrados.</td></tr>
               ) : (
                 tipos.map((t) => (
                   <tr key={t.id}>
                     <td>{t.nombre}</td>
                     <td className="muted">{t.descripcion || '—'}</td>
+                    <td>{t.esFranquicia ? <span className="tag-pill">Franquicia</span> : <span className="muted">—</span>}</td>
                     <td>
                       <span className={`badge ${t.activo !== false ? 'badge-activo' : 'badge-cancelado'}`}>
                         {t.activo !== false ? 'Activo' : 'Inactivo'}

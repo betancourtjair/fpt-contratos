@@ -1,6 +1,7 @@
-// Programador interno de tareas periódicas del backend.
+// Programador interno de tareas periódicas del backend: revisión de vencimientos
+// (src/utils/vencimientos.js) y de notificaciones de franquicia (src/utils/franquicias.js).
 //
-// Antes, "revisar vencimientos" solo corría si alguien llamaba a mano al endpoint
+// Antes, esto solo corría si alguien llamaba a mano al endpoint
 // POST /api/jobs/revisar-vencimientos (pensado para un cron externo que nunca se configuró).
 // Ahora corre solo, desde dentro del propio proceso, de dos formas complementarias:
 //
@@ -15,6 +16,7 @@
 
 const cron = require('node-cron');
 const { revisarVencimientos } = require('../utils/vencimientos');
+const { revisarFranquicias } = require('../utils/franquicias');
 
 const ZONA_HORARIA = 'America/Mexico_City';
 const EXPRESION_DIARIA = '0 7 * * *'; // 07:00 todos los días
@@ -38,6 +40,19 @@ async function ejecutarRevisionSegura(origen) {
     );
   } catch (err) {
     console.error(`[scheduler] Error al revisar vencimientos (${origen}):`, err);
+  }
+
+  try {
+    const resumenFranquicias = await revisarFranquicias();
+    console.log(
+      `[scheduler] Revisión de franquicias (${origen}) completada: ` +
+      `${resumenFranquicias.avisosPagoRegalias} aviso(s) de pago de regalías, ` +
+      `${resumenFranquicias.avisosApertura} aviso(s) de apertura, ` +
+      `${resumenFranquicias.avisosAuditoria} aviso(s) de auditoría, ` +
+      `${resumenFranquicias.pagosAvanzados} pago(s) avanzado(s) a su siguiente periodo.`
+    );
+  } catch (err) {
+    console.error(`[scheduler] Error al revisar franquicias (${origen}):`, err);
   } finally {
     ejecutando = false;
   }
@@ -54,7 +69,7 @@ function iniciarProgramador() {
   });
 
   console.log(
-    `[scheduler] Programador iniciado: revisión de vencimientos al arrancar y todos los días a las 07:00 (${ZONA_HORARIA}).`
+    `[scheduler] Programador iniciado: revisión de vencimientos y de franquicias al arrancar y todos los días a las 07:00 (${ZONA_HORARIA}).`
   );
 }
 

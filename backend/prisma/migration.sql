@@ -115,3 +115,53 @@ CREATE TABLE audit_logs (
   detalle TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ---------------------------------------------------------------------------
+-- Franquicias: un tipo de contrato se marca es_franquicia = true y, al elegirlo,
+-- el formulario despliega estos campos adicionales (1:1 con contratos). Las
+-- columnas *_avisado son control interno del programador de notificaciones
+-- (src/utils/franquicias.js) para no reenviar el mismo aviso cada día.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE tipos_contrato ADD COLUMN es_franquicia BOOLEAN NOT NULL DEFAULT false;
+
+CREATE TABLE contrato_franquicia_detalles (
+  contrato_id UUID PRIMARY KEY REFERENCES contratos(id) ON DELETE CASCADE,
+
+  -- Términos financieros
+  cuota_inicial NUMERIC(14,2),
+  regalias_porcentaje NUMERIC(5,2),
+  fondo_mercadeo_porcentaje NUMERIC(5,2),
+  periodicidad_pago_regalias TEXT, -- 'mensual' | 'trimestral' | 'semestral' | 'anual'
+  fecha_proximo_pago_regalias DATE,
+  dias_aviso_pago_regalias INT NOT NULL DEFAULT 7,
+  pago_regalias_avisado BOOLEAN NOT NULL DEFAULT false,
+
+  -- Territorio y exclusividad
+  territorio TEXT,
+  radio_exclusividad_km NUMERIC(6,2),
+  direccion_punto TEXT,
+
+  -- Plazos y renovación
+  fecha_limite_apertura DATE,
+  dias_aviso_apertura INT NOT NULL DEFAULT 30,
+  apertura_avisada BOOLEAN NOT NULL DEFAULT false,
+  numero_renovaciones_permitidas INT,
+  condiciones_renovacion TEXT,
+  dias_aviso_renovacion INT NOT NULL DEFAULT 60,
+
+  -- Cumplimiento y garantías
+  fecha_proxima_auditoria DATE,
+  dias_aviso_auditoria INT NOT NULL DEFAULT 15,
+  auditoria_avisada BOOLEAN NOT NULL DEFAULT false,
+  polizas_seguro_requeridas TEXT,
+  garantia_personal BOOLEAN NOT NULL DEFAULT false,
+  garante_nombre TEXT,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_franquicia_pago_regalias ON contrato_franquicia_detalles(fecha_proximo_pago_regalias);
+CREATE INDEX idx_franquicia_apertura ON contrato_franquicia_detalles(fecha_limite_apertura);
+CREATE INDEX idx_franquicia_auditoria ON contrato_franquicia_detalles(fecha_proxima_auditoria);

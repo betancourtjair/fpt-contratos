@@ -4,7 +4,7 @@ import { api, unwrap } from '../../api.js';
 import { useAuth } from '../../auth/AuthContext.jsx';
 import Spinner from '../../components/Spinner.jsx';
 import EstatusBadge from '../../components/EstatusBadge.jsx';
-import ContratoForm, { validarContrato } from '../../components/ContratoForm.jsx';
+import ContratoForm, { validarContrato, franquiciaPayload } from '../../components/ContratoForm.jsx';
 import AutorizacionTimeline from '../../components/AutorizacionTimeline.jsx';
 import DocumentosContrato from '../../components/DocumentosContrato.jsx';
 import { formatMonto, formatFecha } from '../../utils.js';
@@ -15,7 +15,12 @@ function normalizarDecision(aprobacion) {
   return 'pendiente';
 }
 
-function contratoAValores(c) {
+function fecha10(v) {
+  return v ? String(v).substring(0, 10) : '';
+}
+
+function contratoAValores(c, fd) {
+  fd = fd || {};
   return {
     titulo: c.titulo || '',
     descripcion: c.descripcion || '',
@@ -27,10 +32,30 @@ function contratoAValores(c) {
     contraparteEmail: c.contraparteEmail || '',
     monto: c.monto ?? '',
     moneda: c.moneda || 'MXN',
-    fechaInicio: c.fechaInicio ? c.fechaInicio.substring(0, 10) : '',
-    fechaFin: c.fechaFin ? c.fechaFin.substring(0, 10) : '',
+    fechaInicio: fecha10(c.fechaInicio),
+    fechaFin: fecha10(c.fechaFin),
     renovacionAutomatica: !!c.renovacionAutomatica,
     diasAvisoVencimiento: c.diasAvisoVencimiento ?? '',
+    // Datos de franquicia (si el contrato no es de franquicia, fd viene vacío y se usan defaults).
+    cuotaInicial: fd.cuotaInicial ?? '',
+    regaliasPorcentaje: fd.regaliasPorcentaje ?? '',
+    fondoMercadeoPorcentaje: fd.fondoMercadeoPorcentaje ?? '',
+    periodicidadPagoRegalias: fd.periodicidadPagoRegalias || 'mensual',
+    fechaProximoPagoRegalias: fecha10(fd.fechaProximoPagoRegalias),
+    diasAvisoPagoRegalias: fd.diasAvisoPagoRegalias ?? '7',
+    territorio: fd.territorio || '',
+    radioExclusividadKm: fd.radioExclusividadKm ?? '',
+    direccionPunto: fd.direccionPunto || '',
+    fechaLimiteApertura: fecha10(fd.fechaLimiteApertura),
+    diasAvisoApertura: fd.diasAvisoApertura ?? '30',
+    numeroRenovacionesPermitidas: fd.numeroRenovacionesPermitidas ?? '',
+    condicionesRenovacion: fd.condicionesRenovacion || '',
+    diasAvisoRenovacion: fd.diasAvisoRenovacion ?? '60',
+    fechaProximaAuditoria: fecha10(fd.fechaProximaAuditoria),
+    diasAvisoAuditoria: fd.diasAvisoAuditoria ?? '15',
+    polizasSeguroRequeridas: fd.polizasSeguroRequeridas || '',
+    garantiaPersonal: !!fd.garantiaPersonal,
+    garanteNombre: fd.garanteNombre || '',
   };
 }
 
@@ -40,6 +65,7 @@ export default function DetalleContrato() {
   const { usuario, esAdmin } = useAuth();
 
   const [contrato, setContrato] = useState(null);
+  const [franquicia, setFranquicia] = useState(null);
   const [tipos, setTipos] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
@@ -71,6 +97,7 @@ export default function DetalleContrato() {
         documentos: data?.documentos ?? base?.documentos ?? [],
       };
       setContrato(normalizado);
+      setFranquicia(data?.franquicia ?? null);
     } catch (err) {
       setError(err.message || 'No se pudo cargar el contrato.');
     } finally {
@@ -115,7 +142,7 @@ export default function DetalleContrato() {
   }, [pasoActual, usuario]);
 
   function iniciarEdicion() {
-    setValoresEdit(contratoAValores(contrato));
+    setValoresEdit(contratoAValores(contrato, franquicia));
     setErroresEdit({});
     setEditando(true);
   }
@@ -135,6 +162,12 @@ export default function DetalleContrato() {
         diasAvisoVencimiento: valoresEdit.diasAvisoVencimiento === '' ? null : Number(valoresEdit.diasAvisoVencimiento),
       };
       await api.patch(`/contratos/${id}`, payload);
+
+      const tipoElegido = tipos.find((t) => t.id === valoresEdit.tipoContratoId);
+      if (tipoElegido?.esFranquicia) {
+        await api.put(`/contratos/${id}/franquicia`, franquiciaPayload(valoresEdit));
+      }
+
       // Recargamos el detalle completo en vez de usar la respuesta del PATCH directamente:
       // esta última solo trae la fila del contrato, sin el tipoContrato ni las aprobaciones/documentos.
       await cargar();
@@ -277,6 +310,78 @@ export default function DetalleContrato() {
               </>
             )}
           </div>
+
+          {!editando && contrato.tipoContrato?.esFranquicia && (
+            <div className="card">
+              <div className="card-title">Datos de franquicia</div>
+              {!franquicia ? (
+                <div className="empty-state">
+                  Este contrato es de franquicia pero aún no tiene datos capturados.
+                  {puedeEditar && ' Usa "Editar" arriba para agregarlos.'}
+                </div>
+              ) : (
+                <dl className="definition-grid">
+                  <div>
+                    <dt>Cuota inicial</dt>
+                    <dd>{formatMonto(franquicia.cuotaInicial, contrato.moneda)}</dd>
+                  </div>
+                  <div>
+                    <dt>Regalías</dt>
+                    <dd>{franquicia.regaliasPorcentaje != null ? `${franquicia.regaliasPorcentaje}%` : '—'}</dd>
+                  </div>
+                  <div>
+                    <dt>Fondo de mercadeo</dt>
+                    <dd>{franquicia.fondoMercadeoPorcentaje != null ? `${franquicia.fondoMercadeoPorcentaje}%` : '—'}</dd>
+                  </div>
+                  <div>
+                    <dt>Próximo pago de regalías</dt>
+                    <dd>
+                      {formatFecha(franquicia.fechaProximoPagoRegalias)}
+                      {franquicia.periodicidadPagoRegalias && ` (${franquicia.periodicidadPagoRegalias})`}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Territorio</dt>
+                    <dd>{franquicia.territorio || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt>Radio de exclusividad</dt>
+                    <dd>{franquicia.radioExclusividadKm != null ? `${franquicia.radioExclusividadKm} km` : '—'}</dd>
+                  </div>
+                  <div>
+                    <dt>Dirección del punto</dt>
+                    <dd>{franquicia.direccionPunto || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt>Fecha límite de apertura</dt>
+                    <dd>{formatFecha(franquicia.fechaLimiteApertura)}</dd>
+                  </div>
+                  <div>
+                    <dt>Renovaciones permitidas</dt>
+                    <dd>{franquicia.numeroRenovacionesPermitidas ?? '—'}</dd>
+                  </div>
+                  <div>
+                    <dt>Próxima auditoría</dt>
+                    <dd>{formatFecha(franquicia.fechaProximaAuditoria)}</dd>
+                  </div>
+                  <div>
+                    <dt>Pólizas de seguro requeridas</dt>
+                    <dd>{franquicia.polizasSeguroRequeridas || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt>Garantía personal</dt>
+                    <dd>{franquicia.garantiaPersonal ? (franquicia.garanteNombre || 'Sí') : 'No'}</dd>
+                  </div>
+                  {franquicia.condicionesRenovacion && (
+                    <div style={{ gridColumn: '1 / -1' }}>
+                      <dt>Condiciones de renovación</dt>
+                      <dd>{franquicia.condicionesRenovacion}</dd>
+                    </div>
+                  )}
+                </dl>
+              )}
+            </div>
+          )}
 
           <div className="card">
             <div className="card-title">Documentos del expediente</div>

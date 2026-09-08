@@ -233,12 +233,155 @@ router.get(
     const documentosConUrl = documentos.map((d) => ({ ...d, url: storage.getUrl(d.ruta_archivo) }));
 
     const { rows: tipoRows } = await query('SELECT * FROM tipos_contrato WHERE id = $1', [contrato.tipo_contrato_id]);
+    const tipoContrato = tipoRows[0] || null;
+
+    let franquicia = null;
+    if (tipoContrato?.es_franquicia) {
+      const { rows: franquiciaRows } = await query(
+        'SELECT * FROM contrato_franquicia_detalles WHERE contrato_id = $1',
+        [contrato.id]
+      );
+      franquicia = franquiciaRows[0] || null;
+    }
 
     res.json({
-      contrato: { ...contrato, tipoContrato: tipoRows[0] || null },
+      contrato: { ...contrato, tipoContrato },
       aprobaciones,
       documentos: documentosConUrl,
+      franquicia,
     });
+  })
+);
+
+// ---------------------------------------------------------------------------
+// PUT /api/contratos/:id/franquicia - crear/actualizar los datos de franquicia
+// (solo aplica si el tipo de contrato está marcado es_franquicia)
+// ---------------------------------------------------------------------------
+const CAMPOS_FRANQUICIA = [
+  'cuotaInicial', 'regaliasPorcentaje', 'fondoMercadeoPorcentaje', 'periodicidadPagoRegalias',
+  'fechaProximoPagoRegalias', 'diasAvisoPagoRegalias', 'territorio', 'radioExclusividadKm',
+  'direccionPunto', 'fechaLimiteApertura', 'diasAvisoApertura', 'numeroRenovacionesPermitidas',
+  'condicionesRenovacion', 'diasAvisoRenovacion', 'fechaProximaAuditoria', 'diasAvisoAuditoria',
+  'polizasSeguroRequeridas', 'garantiaPersonal', 'garanteNombre',
+];
+
+const MAPA_COLUMNAS_FRANQUICIA = {
+  cuotaInicial: 'cuota_inicial',
+  regaliasPorcentaje: 'regalias_porcentaje',
+  fondoMercadeoPorcentaje: 'fondo_mercadeo_porcentaje',
+  periodicidadPagoRegalias: 'periodicidad_pago_regalias',
+  fechaProximoPagoRegalias: 'fecha_proximo_pago_regalias',
+  diasAvisoPagoRegalias: 'dias_aviso_pago_regalias',
+  territorio: 'territorio',
+  radioExclusividadKm: 'radio_exclusividad_km',
+  direccionPunto: 'direccion_punto',
+  fechaLimiteApertura: 'fecha_limite_apertura',
+  diasAvisoApertura: 'dias_aviso_apertura',
+  numeroRenovacionesPermitidas: 'numero_renovaciones_permitidas',
+  condicionesRenovacion: 'condiciones_renovacion',
+  diasAvisoRenovacion: 'dias_aviso_renovacion',
+  fechaProximaAuditoria: 'fecha_proxima_auditoria',
+  diasAvisoAuditoria: 'dias_aviso_auditoria',
+  polizasSeguroRequeridas: 'polizas_seguro_requeridas',
+  garantiaPersonal: 'garantia_personal',
+  garanteNombre: 'garante_nombre',
+};
+
+// Cuando se manda una de estas fechas, se re-arma (resetea) el aviso correspondiente para
+// que vuelva a notificar si la nueva fecha vuelve a caer dentro de su ventana de aviso.
+const CAMPO_FECHA_A_AVISADO = {
+  fechaProximoPagoRegalias: 'pago_regalias_avisado',
+  fechaLimiteApertura: 'apertura_avisada',
+  fechaProximaAuditoria: 'auditoria_avisada',
+};
+
+const PERIODICIDADES_VALIDAS = ['mensual', 'trimestral', 'semestral', 'anual'];
+
+router.put(
+  '/:id/franquicia',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const contrato = await cargarContrato(req.params.id);
+    if (!contrato) throw notFound('Contrato no encontrado.');
+
+    const esDueño = contrato.solicitado_por_id === req.usuario.id;
+    const esAdmin = ['super_admin', 'admin'].includes(req.usuario.rol);
+    if (!esAdmin) {
+      if (!esDueño) throw forbidden('No puedes editar los datos de franquicia de un contrato que no solicitaste.');
+      if (contrato.estatus !== 'borrador') {
+        throw forbidden('Solo se pueden editar los datos de franquicia mientras el contrato está en borrador.');
+      }
+    }
+
+    const { rows: tipoRows } = await query('SELECT * FROM tipos_contrato WHERE id = $1', [contrato.tipo_contrato_id]);
+    if (!tipoRows[0]?.es_franquicia) {
+      throw badRequest('Este contrato no es de un tipo marcado como franquicia.');
+    }
+
+    const body = req.body || {};
+    if (body.periodicidadPagoRegalias && !PERIODICIDADES_VALIDAS.includes(body.periodicidadPagoRegalias)) {
+      throw badRequest(`periodicidadPagoRegalias inválida. Valores permitidos: ${PERIODICIDADES_VALIDAS.join(', ')}.`);
+    }
+    for (const campoPorcentaje of ['regaliasPorcentaje', 'fondoMercadeoPorcentaje']) {
+      const valor = body[campoPorcentaje];
+      if (valor !== undefined && valor !== null && valor !== '') {
+        const num = Number(valor);
+        if (Number.isNaN(num) || num < 0 || num > 100) {
+          throw badRequest(`${campoPorcentaje} debe ser un porcentaje entre 0 y 100.`);
+        }
+      }
+    }
+
+    const columnas = ['contrato_id'];
+    const marcadores = ['$1'];
+    const valores = [contrato.id];
+    const actualizaciones = [];
+    let i = 2;
+
+    for (const campo of CAMPOS_FRANQUICIA) {
+      if (body[campo] === undefined) continue;
+      const columna = MAPA_COLUMNAS_FRANQUICIA[campo];
+      const valor = body[campo] === '' ? null : body[campo];
+      columnas.push(columna);
+      marcadores.push(`$${i}`);
+      valores.push(valor);
+      actualizaciones.push(`${columna} = $${i}`);
+      i++;
+
+      const columnaAvisado = CAMPO_FECHA_A_AVISADO[campo];
+      if (columnaAvisado) {
+        columnas.push(columnaAvisado);
+        marcadores.push(`$${i}`);
+        valores.push(false);
+        actualizaciones.push(`${columnaAvisado} = $${i}`);
+        i++;
+      }
+    }
+
+    actualizaciones.push('updated_at = now()');
+
+    try {
+      const { rows } = await query(
+        `INSERT INTO contrato_franquicia_detalles (${columnas.join(', ')})
+         VALUES (${marcadores.join(', ')})
+         ON CONFLICT (contrato_id) DO UPDATE SET ${actualizaciones.join(', ')}
+         RETURNING *`,
+        valores
+      );
+
+      await registrarAuditoria({
+        contratoId: contrato.id,
+        usuarioId: req.usuario.id,
+        accion: 'franquicia_datos_actualizados',
+        detalle: 'Se actualizaron los datos de franquicia del contrato.',
+      });
+
+      res.json({ franquicia: rows[0] });
+    } catch (err) {
+      const traducido = traducirErrorPostgres(err);
+      if (traducido) throw traducido;
+      throw err;
+    }
   })
 );
 

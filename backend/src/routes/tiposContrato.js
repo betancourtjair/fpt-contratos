@@ -27,12 +27,12 @@ router.post(
   requireAuth,
   requireRole('super_admin', 'admin'),
   asyncHandler(async (req, res) => {
-    const { nombre, descripcion } = req.body || {};
+    const { nombre, descripcion, esFranquicia } = req.body || {};
     if (!nombre) throw badRequest('nombre es requerido.');
     try {
       const { rows } = await query(
-        `INSERT INTO tipos_contrato (nombre, descripcion) VALUES ($1, $2) RETURNING *`,
-        [nombre, descripcion || null]
+        `INSERT INTO tipos_contrato (nombre, descripcion, es_franquicia) VALUES ($1, $2, $3) RETURNING *`,
+        [nombre, descripcion || null, Boolean(esFranquicia)]
       );
       res.status(201).json({ tipoContrato: rows[0] });
     } catch (err) {
@@ -50,7 +50,7 @@ router.patch(
   requireRole('super_admin', 'admin'),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const { nombre, descripcion, activo } = req.body || {};
+    const { nombre, descripcion, activo, esFranquicia } = req.body || {};
 
     const campos = [];
     const valores = [];
@@ -58,6 +58,7 @@ router.patch(
     if (nombre !== undefined) { campos.push(`nombre = $${i++}`); valores.push(nombre); }
     if (descripcion !== undefined) { campos.push(`descripcion = $${i++}`); valores.push(descripcion); }
     if (activo !== undefined) { campos.push(`activo = $${i++}`); valores.push(Boolean(activo)); }
+    if (esFranquicia !== undefined) { campos.push(`es_franquicia = $${i++}`); valores.push(Boolean(esFranquicia)); }
     if (campos.length === 0) throw badRequest('No se envió ningún campo para actualizar.');
     valores.push(id);
 

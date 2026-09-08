@@ -4,19 +4,16 @@
 //
 // Marca:
 //   - 'activo' o 'por_vencer' con fecha_fin ya pasada -> 'vencido'
-//   - 'activo' cuya fecha_fin cae dentro de su dias_aviso_vencimiento -> 'por_vencer'
+//   - 'activo' cuya fecha_fin cae dentro de su ventana de aviso -> 'por_vencer'
+//     (la ventana es dias_aviso_renovacion cuando el contrato es de franquicia —
+//     normalmente se necesita más anticipación para decidir una renovación de franquicia
+//     que para un contrato genérico — y dias_aviso_vencimiento en cualquier otro caso)
 // y envía correo de aviso al solicitante y a juridico/admin en cada transición.
 
 const { query, withTransaction } = require('../db');
 const { registrarAuditoria } = require('./audit');
 const { enviarCorreo } = require('../email');
-
-async function obtenerCorreosJuridicoAdmin(client) {
-  const { rows } = await client.query(
-    `SELECT email FROM usuarios WHERE rol IN ('juridico', 'admin', 'super_admin') AND activo = true`
-  );
-  return rows.map((r) => r.email);
-}
+const { obtenerCorreosJuridicoAdmin, formatFecha } = require('./notificaciones');
 
 async function revisarVencimientos() {
   const resumen = { marcadosVencido: [], marcadosPorVencer: [] };
@@ -41,23 +38,34 @@ async function revisarVencimientos() {
       resumen.marcadosVencido.push({ id: contrato.id, folio: contrato.folio });
     }
 
-    // 2) Por vencer: activos cuya fecha_fin cae dentro de su ventana de aviso.
+    // 2) Por vencer: activos cuya fecha_fin cae dentro de su ventana de aviso. Si el
+    // contrato tiene fila en contrato_franquicia_detalles, esa ventana es dias_aviso_renovacion
+    // (pensada para dar más tiempo de decidir una renovación de franquicia); si no, es la
+    // dias_aviso_vencimiento genérica del contrato.
     const { rows: porVencer } = await client.query(
-      `UPDATE contratos
+      `UPDATE contratos c
        SET estatus = 'por_vencer', updated_at = now()
-       WHERE estatus = 'activo' AND fecha_fin IS NOT NULL
-         AND fecha_fin >= CURRENT_DATE
-         AND fecha_fin <= (CURRENT_DATE + (dias_aviso_vencimiento || ' days')::interval)
-       RETURNING *`
+       FROM (
+         SELECT c2.id, fd.contrato_id IS NOT NULL AS es_franquicia
+         FROM contratos c2
+         LEFT JOIN contrato_franquicia_detalles fd ON fd.contrato_id = c2.id
+         WHERE c2.estatus = 'activo' AND c2.fecha_fin IS NOT NULL
+           AND c2.fecha_fin >= CURRENT_DATE
+           AND c2.fecha_fin <= (CURRENT_DATE + (COALESCE(fd.dias_aviso_renovacion, c2.dias_aviso_vencimiento) || ' days')::interval)
+       ) elegibles
+       WHERE c.id = elegibles.id
+       RETURNING c.*, elegibles.es_franquicia`
     );
     for (const contrato of porVencer) {
       await registrarAuditoria({
         contratoId: contrato.id,
         accion: 'contrato_por_vencer',
-        detalle: `Marcado automáticamente como por_vencer (fecha_fin: ${contrato.fecha_fin}, aviso: ${contrato.dias_aviso_vencimiento} días).`,
+        detalle: contrato.es_franquicia
+          ? `Marcado automáticamente como por_vencer: toca decidir la renovación de la franquicia (fecha_fin: ${contrato.fecha_fin}).`
+          : `Marcado automáticamente como por_vencer (fecha_fin: ${contrato.fecha_fin}, aviso: ${contrato.dias_aviso_vencimiento} días).`,
         db: client,
       });
-      resumen.marcadosPorVencer.push({ id: contrato.id, folio: contrato.folio });
+      resumen.marcadosPorVencer.push({ id: contrato.id, folio: contrato.folio, esFranquicia: contrato.es_franquicia });
     }
 
     resumen._correosLegalAdmin = correosLegalAdmin;
@@ -79,19 +87,21 @@ async function revisarVencimientos() {
       const destinatarios = [solicitanteEmail, ...correosLegalAdmin].filter(Boolean);
       if (destinatarios.length === 0) continue;
 
-      const fechaFinTexto =
-        contrato.fecha_fin instanceof Date
-          ? contrato.fecha_fin.toISOString().slice(0, 10)
-          : String(contrato.fecha_fin);
+      const fechaFinTexto = formatFecha(contrato.fecha_fin);
+      const esFranquicia = tipo === 'por_vencer' && contrato.es_franquicia;
 
       const asunto =
         tipo === 'vencido'
           ? `Contrato ${contrato.folio} VENCIDO`
-          : `Contrato ${contrato.folio} próximo a vencer`;
+          : esFranquicia
+            ? `Contrato de franquicia ${contrato.folio}: toca decidir la renovación`
+            : `Contrato ${contrato.folio} próximo a vencer`;
       const cuerpo =
         tipo === 'vencido'
           ? `<p>El contrato <b>${contrato.folio} - ${contrato.titulo}</b> venció el ${fechaFinTexto}.</p>`
-          : `<p>El contrato <b>${contrato.folio} - ${contrato.titulo}</b> vence el ${fechaFinTexto} (dentro de su ventana de aviso de ${contrato.dias_aviso_vencimiento} días).</p>`;
+          : esFranquicia
+            ? `<p>El contrato de franquicia <b>${contrato.folio} - ${contrato.titulo}</b> vence el ${fechaFinTexto}. Es momento de decidir si se renueva, conforme a las condiciones de renovación pactadas.</p>`
+            : `<p>El contrato <b>${contrato.folio} - ${contrato.titulo}</b> vence el ${fechaFinTexto} (dentro de su ventana de aviso de ${contrato.dias_aviso_vencimiento} días).</p>`;
 
       await enviarCorreo(destinatarios.join(','), asunto, cuerpo);
     } catch (err) {

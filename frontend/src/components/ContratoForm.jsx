@@ -1,4 +1,38 @@
 const MONEDAS = ['MXN', 'USD'];
+const PERIODICIDADES_REGALIAS = [
+  { value: 'mensual', label: 'Mensual' },
+  { value: 'trimestral', label: 'Trimestral' },
+  { value: 'semestral', label: 'Semestral' },
+  { value: 'anual', label: 'Anual' },
+];
+
+const CAMPOS_FRANQUICIA_NUMERICOS = new Set([
+  'cuotaInicial', 'regaliasPorcentaje', 'fondoMercadeoPorcentaje', 'diasAvisoPagoRegalias',
+  'radioExclusividadKm', 'diasAvisoApertura', 'numeroRenovacionesPermitidas', 'diasAvisoRenovacion',
+  'diasAvisoAuditoria',
+]);
+const CAMPOS_FRANQUICIA_TEXTO = [
+  'periodicidadPagoRegalias', 'fechaProximoPagoRegalias', 'territorio', 'direccionPunto',
+  'fechaLimiteApertura', 'condicionesRenovacion', 'fechaProximaAuditoria', 'polizasSeguroRequeridas',
+  'garanteNombre',
+];
+const CAMPOS_FRANQUICIA_BOOLEAN = ['garantiaPersonal'];
+const CAMPOS_FRANQUICIA = [...CAMPOS_FRANQUICIA_NUMERICOS, ...CAMPOS_FRANQUICIA_TEXTO, ...CAMPOS_FRANQUICIA_BOOLEAN];
+
+/** Extrae y normaliza del objeto de valores del form solo los campos de franquicia,
+ * listos para PUT /api/contratos/:id/franquicia (strings vacíos -> null, numéricos -> Number). */
+export function franquiciaPayload(valores) {
+  const payload = {};
+  for (const campo of CAMPOS_FRANQUICIA) {
+    const valor = valores[campo];
+    if (CAMPOS_FRANQUICIA_NUMERICOS.has(campo)) {
+      payload[campo] = valor === '' || valor === null || valor === undefined ? null : Number(valor);
+    } else {
+      payload[campo] = valor === undefined ? null : valor;
+    }
+  }
+  return payload;
+}
 
 export function contratoFormVacio() {
   return {
@@ -16,6 +50,26 @@ export function contratoFormVacio() {
     fechaFin: '',
     renovacionAutomatica: false,
     diasAvisoVencimiento: '30',
+    // Datos de franquicia (solo se usan/envían si el tipo de contrato es de franquicia).
+    cuotaInicial: '',
+    regaliasPorcentaje: '',
+    fondoMercadeoPorcentaje: '',
+    periodicidadPagoRegalias: 'mensual',
+    fechaProximoPagoRegalias: '',
+    diasAvisoPagoRegalias: '7',
+    territorio: '',
+    radioExclusividadKm: '',
+    direccionPunto: '',
+    fechaLimiteApertura: '',
+    diasAvisoApertura: '30',
+    numeroRenovacionesPermitidas: '',
+    condicionesRenovacion: '',
+    diasAvisoRenovacion: '60',
+    fechaProximaAuditoria: '',
+    diasAvisoAuditoria: '15',
+    polizasSeguroRequeridas: '',
+    garantiaPersonal: false,
+    garanteNombre: '',
   };
 }
 
@@ -50,6 +104,13 @@ export function validarContrato(valores) {
     if (Number.isNaN(num) || num < 0) errores.diasAvisoVencimiento = 'Debe ser un número de días válido.';
   }
 
+  for (const campo of ['regaliasPorcentaje', 'fondoMercadeoPorcentaje']) {
+    if (valores[campo] !== '' && valores[campo] !== null && valores[campo] !== undefined) {
+      const num = Number(valores[campo]);
+      if (Number.isNaN(num) || num < 0 || num > 100) errores[campo] = 'Debe ser un porcentaje entre 0 y 100.';
+    }
+  }
+
   return errores;
 }
 
@@ -57,6 +118,9 @@ export default function ContratoForm({ valores, onChange, errores = {}, tipos = 
   function set(campo, valor) {
     onChange({ ...valores, [campo]: valor });
   }
+
+  const tipoSeleccionado = tipos.find((t) => t.id === valores.tipoContratoId);
+  const esFranquicia = !!tipoSeleccionado?.esFranquicia;
 
   return (
     <div>
@@ -238,6 +302,252 @@ export default function ContratoForm({ valores, onChange, errores = {}, tipos = 
         />
         <label htmlFor="renovacionAutomatica" style={{ marginBottom: 0 }}>Renovación automática</label>
       </div>
+
+      {esFranquicia && (
+        <>
+          <hr className="divider" />
+          <h3>Datos de franquicia</h3>
+          <p className="page-header-sub" style={{ marginTop: -8, marginBottom: 14 }}>
+            Campos propios del contrato de franquicia: activan sus avisos automáticos por correo.
+          </p>
+
+          <h4 className="form-subheading">Términos financieros</h4>
+          <div className="form-row-3">
+            <div className="field">
+              <label htmlFor="cuotaInicial">Cuota inicial de franquicia</label>
+              <input
+                id="cuotaInicial"
+                type="number"
+                min="0"
+                step="0.01"
+                value={valores.cuotaInicial}
+                disabled={disabled}
+                onChange={(e) => set('cuotaInicial', e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="regaliasPorcentaje">Regalías (%)</label>
+              <input
+                id="regaliasPorcentaje"
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                value={valores.regaliasPorcentaje}
+                disabled={disabled}
+                onChange={(e) => set('regaliasPorcentaje', e.target.value)}
+              />
+              {errores.regaliasPorcentaje && <div className="error-text">{errores.regaliasPorcentaje}</div>}
+            </div>
+            <div className="field">
+              <label htmlFor="fondoMercadeoPorcentaje">Fondo de mercadeo (%)</label>
+              <input
+                id="fondoMercadeoPorcentaje"
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                value={valores.fondoMercadeoPorcentaje}
+                disabled={disabled}
+                onChange={(e) => set('fondoMercadeoPorcentaje', e.target.value)}
+              />
+              {errores.fondoMercadeoPorcentaje && <div className="error-text">{errores.fondoMercadeoPorcentaje}</div>}
+            </div>
+          </div>
+
+          <div className="form-row-3">
+            <div className="field">
+              <label htmlFor="periodicidadPagoRegalias">Periodicidad de pago</label>
+              <select
+                id="periodicidadPagoRegalias"
+                value={valores.periodicidadPagoRegalias}
+                disabled={disabled}
+                onChange={(e) => set('periodicidadPagoRegalias', e.target.value)}
+              >
+                {PERIODICIDADES_REGALIAS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="fechaProximoPagoRegalias">Próximo pago de regalías</label>
+              <input
+                id="fechaProximoPagoRegalias"
+                type="date"
+                value={valores.fechaProximoPagoRegalias}
+                disabled={disabled}
+                onChange={(e) => set('fechaProximoPagoRegalias', e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="diasAvisoPagoRegalias">Días de aviso</label>
+              <input
+                id="diasAvisoPagoRegalias"
+                type="number"
+                min="0"
+                value={valores.diasAvisoPagoRegalias}
+                disabled={disabled}
+                onChange={(e) => set('diasAvisoPagoRegalias', e.target.value)}
+              />
+            </div>
+          </div>
+
+          <h4 className="form-subheading">Territorio y exclusividad</h4>
+          <div className="form-row-3">
+            <div className="field">
+              <label htmlFor="territorio">Territorio asignado</label>
+              <input
+                id="territorio"
+                type="text"
+                value={valores.territorio}
+                disabled={disabled}
+                onChange={(e) => set('territorio', e.target.value)}
+                placeholder="Ej. Zona metropolitana de Monterrey"
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="radioExclusividadKm">Radio de exclusividad (km)</label>
+              <input
+                id="radioExclusividadKm"
+                type="number"
+                min="0"
+                step="0.1"
+                value={valores.radioExclusividadKm}
+                disabled={disabled}
+                onChange={(e) => set('radioExclusividadKm', e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="direccionPunto">Dirección del punto</label>
+              <input
+                id="direccionPunto"
+                type="text"
+                value={valores.direccionPunto}
+                disabled={disabled}
+                onChange={(e) => set('direccionPunto', e.target.value)}
+              />
+            </div>
+          </div>
+
+          <h4 className="form-subheading">Plazos y renovación</h4>
+          <div className="form-row-3">
+            <div className="field">
+              <label htmlFor="fechaLimiteApertura">Fecha límite de apertura</label>
+              <input
+                id="fechaLimiteApertura"
+                type="date"
+                value={valores.fechaLimiteApertura}
+                disabled={disabled}
+                onChange={(e) => set('fechaLimiteApertura', e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="diasAvisoApertura">Días de aviso (apertura)</label>
+              <input
+                id="diasAvisoApertura"
+                type="number"
+                min="0"
+                value={valores.diasAvisoApertura}
+                disabled={disabled}
+                onChange={(e) => set('diasAvisoApertura', e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="numeroRenovacionesPermitidas">Renovaciones permitidas</label>
+              <input
+                id="numeroRenovacionesPermitidas"
+                type="number"
+                min="0"
+                value={valores.numeroRenovacionesPermitidas}
+                disabled={disabled}
+                onChange={(e) => set('numeroRenovacionesPermitidas', e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="form-row">
+            <div className="field">
+              <label htmlFor="condicionesRenovacion">Condiciones de renovación</label>
+              <textarea
+                id="condicionesRenovacion"
+                value={valores.condicionesRenovacion}
+                disabled={disabled}
+                onChange={(e) => set('condicionesRenovacion', e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="diasAvisoRenovacion">Días de aviso antes de renovar</label>
+              <input
+                id="diasAvisoRenovacion"
+                type="number"
+                min="0"
+                value={valores.diasAvisoRenovacion}
+                disabled={disabled}
+                onChange={(e) => set('diasAvisoRenovacion', e.target.value)}
+              />
+            </div>
+          </div>
+
+          <h4 className="form-subheading">Cumplimiento y garantías</h4>
+          <div className="form-row-3">
+            <div className="field">
+              <label htmlFor="fechaProximaAuditoria">Próxima auditoría/inspección</label>
+              <input
+                id="fechaProximaAuditoria"
+                type="date"
+                value={valores.fechaProximaAuditoria}
+                disabled={disabled}
+                onChange={(e) => set('fechaProximaAuditoria', e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="diasAvisoAuditoria">Días de aviso (auditoría)</label>
+              <input
+                id="diasAvisoAuditoria"
+                type="number"
+                min="0"
+                value={valores.diasAvisoAuditoria}
+                disabled={disabled}
+                onChange={(e) => set('diasAvisoAuditoria', e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="polizasSeguroRequeridas">Pólizas de seguro requeridas</label>
+              <input
+                id="polizasSeguroRequeridas"
+                type="text"
+                value={valores.polizasSeguroRequeridas}
+                disabled={disabled}
+                onChange={(e) => set('polizasSeguroRequeridas', e.target.value)}
+                placeholder="Ej. Responsabilidad civil, daños a terceros"
+              />
+            </div>
+          </div>
+
+          <div className="form-row">
+            <div className="field checkbox-row">
+              <input
+                id="garantiaPersonal"
+                type="checkbox"
+                checked={!!valores.garantiaPersonal}
+                disabled={disabled}
+                onChange={(e) => set('garantiaPersonal', e.target.checked)}
+              />
+              <label htmlFor="garantiaPersonal" style={{ marginBottom: 0 }}>Requiere garantía personal del franquiciatario</label>
+            </div>
+            {valores.garantiaPersonal && (
+              <div className="field">
+                <label htmlFor="garanteNombre">Nombre del garante</label>
+                <input
+                  id="garanteNombre"
+                  type="text"
+                  value={valores.garanteNombre}
+                  disabled={disabled}
+                  onChange={(e) => set('garanteNombre', e.target.value)}
+                />
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

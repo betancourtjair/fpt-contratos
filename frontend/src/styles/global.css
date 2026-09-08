@@ -599,6 +599,15 @@ tbody tr:hover { background: var(--fpt-purple-50); }
   border: none;
 }
 
+.form-subheading {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-primary);
+  margin: 20px 0 8px 0;
+}
+
 .definition-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);

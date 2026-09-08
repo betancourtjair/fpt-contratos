@@ -55,11 +55,47 @@ router.get(
       [usuario.id]
     );
 
+    // Próximos eventos de franquicia (pago de regalías, apertura, auditoría) dentro de su
+    // propia ventana de aviso — misma condición que usa el programador para notificar
+    // (ver src/utils/franquicias.js), para que el dashboard y los correos coincidan.
+    const condicionFranquicia = visibilidad ? `AND ${visibilidad.condicion}` : '';
+    const { rows: franquiciasProximas } = await query(
+      `SELECT * FROM (
+         SELECT c.id AS contrato_id, c.folio, c.titulo, c.estatus, 'pago_regalias' AS tipo,
+                fd.fecha_proximo_pago_regalias AS fecha
+         FROM contrato_franquicia_detalles fd
+         JOIN contratos c ON c.id = fd.contrato_id
+         WHERE c.estatus IN ('activo', 'por_vencer') AND fd.fecha_proximo_pago_regalias IS NOT NULL
+           AND fd.fecha_proximo_pago_regalias <= (CURRENT_DATE + (fd.dias_aviso_pago_regalias || ' days')::interval)
+           ${condicionFranquicia}
+         UNION ALL
+         SELECT c.id, c.folio, c.titulo, c.estatus, 'apertura',
+                fd.fecha_limite_apertura
+         FROM contrato_franquicia_detalles fd
+         JOIN contratos c ON c.id = fd.contrato_id
+         WHERE c.estatus IN ('activo', 'por_vencer') AND fd.fecha_limite_apertura IS NOT NULL
+           AND fd.fecha_limite_apertura <= (CURRENT_DATE + (fd.dias_aviso_apertura || ' days')::interval)
+           ${condicionFranquicia}
+         UNION ALL
+         SELECT c.id, c.folio, c.titulo, c.estatus, 'auditoria',
+                fd.fecha_proxima_auditoria
+         FROM contrato_franquicia_detalles fd
+         JOIN contratos c ON c.id = fd.contrato_id
+         WHERE c.estatus IN ('activo', 'por_vencer') AND fd.fecha_proxima_auditoria IS NOT NULL
+           AND fd.fecha_proxima_auditoria <= (CURRENT_DATE + (fd.dias_aviso_auditoria || ' days')::interval)
+           ${condicionFranquicia}
+       ) eventos
+       ORDER BY fecha ASC
+       LIMIT 20`,
+      valoresVisibles
+    );
+
     res.json({
       conteosPorEstatus,
       contratosPorVencer: porVencer,
       misPendientesAprobar: pendientesAprobar,
       misSolicitudesRecientes,
+      franquiciasProximas,
     });
   })
 );
