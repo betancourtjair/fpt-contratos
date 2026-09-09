@@ -165,3 +165,43 @@ CREATE TABLE contrato_franquicia_detalles (
 CREATE INDEX idx_franquicia_pago_regalias ON contrato_franquicia_detalles(fecha_proximo_pago_regalias);
 CREATE INDEX idx_franquicia_apertura ON contrato_franquicia_detalles(fecha_limite_apertura);
 CREATE INDEX idx_franquicia_auditoria ON contrato_franquicia_detalles(fecha_proxima_auditoria);
+
+-- ---------------------------------------------------------------------------
+-- Versionamiento de documentos: cada fila de contrato_documentos sigue siendo un
+-- archivo físico, pero ahora las versiones del "mismo" documento (p.ej. varias
+-- versiones firmadas de un mismo anexo) comparten grupo_id. es_version_actual = true
+-- marca cuál es la vigente dentro de su grupo (así el expediente puede listar solo las
+-- vigentes por default y expandir el historial completo por grupo_id bajo demanda).
+-- reemplaza_a_id apunta a la versión anterior del mismo grupo (o NULL si es la v1).
+-- origen distingue los documentos generados automáticamente desde una plantilla
+-- (ver plantillas_tipo_contrato más abajo) de los subidos a mano.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE contrato_documentos ADD COLUMN grupo_id UUID;
+UPDATE contrato_documentos SET grupo_id = id WHERE grupo_id IS NULL;
+ALTER TABLE contrato_documentos ALTER COLUMN grupo_id SET NOT NULL;
+
+ALTER TABLE contrato_documentos ADD COLUMN reemplaza_a_id UUID REFERENCES contrato_documentos(id);
+ALTER TABLE contrato_documentos ADD COLUMN es_version_actual BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE contrato_documentos ADD COLUMN origen TEXT NOT NULL DEFAULT 'manual'; -- 'manual' | 'plantilla'
+
+CREATE INDEX idx_documentos_grupo ON contrato_documentos(grupo_id);
+CREATE INDEX idx_documentos_contrato_actual ON contrato_documentos(contrato_id, es_version_actual);
+
+-- ---------------------------------------------------------------------------
+-- Plantillas por tipo de contrato: un archivo Word (.docx) con marcadores {{llave}}
+-- (ej. {{contraparteNombre}}, {{monto}}, y para franquicias {{regaliasPorcentaje}}, etc.)
+-- que el backend puebla con los datos capturados del contrato (ver
+-- src/utils/plantillas.js) para generar automáticamente un documento y agregarlo
+-- al expediente como nueva versión (origen = 'plantilla'). Una plantilla por tipo
+-- de contrato; volver a subir reemplaza la anterior.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE plantillas_tipo_contrato (
+  tipo_contrato_id UUID PRIMARY KEY REFERENCES tipos_contrato(id) ON DELETE CASCADE,
+  nombre_archivo TEXT NOT NULL,
+  ruta_archivo TEXT NOT NULL,
+  subido_por_id UUID NOT NULL REFERENCES usuarios(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

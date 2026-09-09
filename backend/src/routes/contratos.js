@@ -1,5 +1,6 @@
 const express = require('express');
 const multer = require('multer');
+const fs = require('fs');
 const { query, withTransaction } = require('../db');
 const asyncHandler = require('../utils/asyncHandler');
 const { badRequest, notFound, forbidden, conflict, traducirErrorPostgres } = require('../utils/errors');
@@ -15,6 +16,7 @@ const {
 const { enviarCorreo } = require('../email');
 const storage = require('../storage');
 const { condicionVisibilidad } = require('../utils/visibilidad');
+const { datosParaPlantilla, renderizarPlantilla } = require('../utils/plantillas');
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -226,13 +228,26 @@ router.get(
       throw forbidden('No tienes acceso a este contrato.');
     }
 
+    // Solo la versión vigente de cada documento (grupo_id); el historial completo de un
+    // grupo se consulta aparte (GET /:id/documentos/grupo/:grupoId) para no cargar de más.
     const { rows: documentos } = await query(
-      'SELECT * FROM contrato_documentos WHERE contrato_id = $1 ORDER BY created_at DESC',
+      `SELECT d.*, u.nombre AS subido_por_nombre,
+              (SELECT COUNT(*) FROM contrato_documentos d2 WHERE d2.grupo_id = d.grupo_id)::int AS total_versiones
+       FROM contrato_documentos d
+       LEFT JOIN usuarios u ON u.id = d.subido_por_id
+       WHERE d.contrato_id = $1 AND d.es_version_actual = true
+       ORDER BY d.created_at DESC`,
       [contrato.id]
     );
     const documentosConUrl = documentos.map((d) => ({ ...d, url: storage.getUrl(d.ruta_archivo) }));
 
-    const { rows: tipoRows } = await query('SELECT * FROM tipos_contrato WHERE id = $1', [contrato.tipo_contrato_id]);
+    const { rows: tipoRows } = await query(
+      `SELECT tc.*, p.nombre_archivo AS plantilla_nombre_archivo
+       FROM tipos_contrato tc
+       LEFT JOIN plantillas_tipo_contrato p ON p.tipo_contrato_id = tc.id
+       WHERE tc.id = $1`,
+      [contrato.tipo_contrato_id]
+    );
     const tipoContrato = tipoRows[0] || null;
 
     let franquicia = null;
@@ -650,6 +665,10 @@ router.post(
 // ---------------------------------------------------------------------------
 
 // POST /api/contratos/:id/documentos (multipart)
+// Campo opcional "grupoId": si se manda y corresponde a un documento vigente de este mismo
+// contrato, el archivo se guarda como una NUEVA VERSIÓN de ese documento (mismo grupo_id,
+// version = anterior + 1) y la versión anterior deja de ser la vigente. Si se omite, el
+// archivo arranca un documento nuevo (grupo propio, v1).
 router.post(
   '/:id/documentos',
   requireAuth,
@@ -665,6 +684,19 @@ router.post(
       throw badRequest(`categoria inválida. Valores permitidos: ${categoriasValidas.join(', ')}.`);
     }
 
+    const grupoIdSolicitado = req.body.grupoId || null;
+    let anterior = null;
+    if (grupoIdSolicitado) {
+      const { rows: anteriorRows } = await query(
+        `SELECT * FROM contrato_documentos WHERE grupo_id = $1 AND contrato_id = $2 AND es_version_actual = true`,
+        [grupoIdSolicitado, contrato.id]
+      );
+      anterior = anteriorRows[0];
+      if (!anterior) {
+        throw badRequest('El documento indicado para nueva versión no existe o no pertenece a este contrato.');
+      }
+    }
+
     const rutaArchivo = await storage.save({
       buffer: req.file.buffer,
       originalname: req.file.originalname,
@@ -672,18 +704,37 @@ router.post(
     });
 
     try {
-      const { rows } = await query(
-        `INSERT INTO contrato_documentos (contrato_id, nombre_archivo, ruta_archivo, categoria, subido_por_id)
-         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [contrato.id, req.file.originalname, rutaArchivo, categoria, req.usuario.id]
-      );
+      const documento = await withTransaction(async (client) => {
+        if (anterior) {
+          await client.query(
+            `UPDATE contrato_documentos SET es_version_actual = false WHERE id = $1`,
+            [anterior.id]
+          );
+          const { rows } = await client.query(
+            `INSERT INTO contrato_documentos
+               (contrato_id, nombre_archivo, ruta_archivo, categoria, subido_por_id, grupo_id, version, reemplaza_a_id, es_version_actual)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true) RETURNING *`,
+            [contrato.id, req.file.originalname, rutaArchivo, categoria, req.usuario.id, anterior.grupo_id, anterior.version + 1, anterior.id]
+          );
+          return rows[0];
+        }
+        const { rows } = await client.query(
+          `INSERT INTO contrato_documentos (contrato_id, nombre_archivo, ruta_archivo, categoria, subido_por_id, grupo_id, version)
+           VALUES ($1, $2, $3, $4, $5, gen_random_uuid(), 1) RETURNING *`,
+          [contrato.id, req.file.originalname, rutaArchivo, categoria, req.usuario.id]
+        );
+        return rows[0];
+      });
+
       await registrarAuditoria({
         contratoId: contrato.id,
         usuarioId: req.usuario.id,
         accion: 'documento_subido',
-        detalle: `Archivo "${req.file.originalname}" (categoría ${categoria}).`,
+        detalle: anterior
+          ? `Archivo "${req.file.originalname}" (categoría ${categoria}), versión ${documento.version} de "${anterior.nombre_archivo}".`
+          : `Archivo "${req.file.originalname}" (categoría ${categoria}).`,
       });
-      res.status(201).json({ documento: { ...rows[0], url: storage.getUrl(rows[0].ruta_archivo) } });
+      res.status(201).json({ documento: { ...documento, url: storage.getUrl(documento.ruta_archivo) } });
     } catch (err) {
       await storage.delete(rutaArchivo).catch(() => {});
       const traducido = traducirErrorPostgres(err);
@@ -693,7 +744,7 @@ router.post(
   })
 );
 
-// GET /api/contratos/:id/documentos
+// GET /api/contratos/:id/documentos - solo la versión vigente de cada documento
 router.get(
   '/:id/documentos',
   requireAuth,
@@ -701,10 +752,121 @@ router.get(
     const contrato = await cargarContrato(req.params.id);
     if (!contrato) throw notFound('Contrato no encontrado.');
     const { rows } = await query(
-      'SELECT * FROM contrato_documentos WHERE contrato_id = $1 ORDER BY created_at DESC',
+      `SELECT d.*, u.nombre AS subido_por_nombre,
+              (SELECT COUNT(*) FROM contrato_documentos d2 WHERE d2.grupo_id = d.grupo_id)::int AS total_versiones
+       FROM contrato_documentos d
+       LEFT JOIN usuarios u ON u.id = d.subido_por_id
+       WHERE d.contrato_id = $1 AND d.es_version_actual = true
+       ORDER BY d.created_at DESC`,
       [contrato.id]
     );
     res.json({ documentos: rows.map((d) => ({ ...d, url: storage.getUrl(d.ruta_archivo) })) });
+  })
+);
+
+// GET /api/contratos/:id/documentos/grupo/:grupoId - historial completo de versiones de un documento
+router.get(
+  '/:id/documentos/grupo/:grupoId',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const contrato = await cargarContrato(req.params.id);
+    if (!contrato) throw notFound('Contrato no encontrado.');
+    const { rows } = await query(
+      `SELECT d.*, u.nombre AS subido_por_nombre
+       FROM contrato_documentos d
+       LEFT JOIN usuarios u ON u.id = d.subido_por_id
+       WHERE d.contrato_id = $1 AND d.grupo_id = $2
+       ORDER BY d.version DESC`,
+      [contrato.id, req.params.grupoId]
+    );
+    if (rows.length === 0) throw notFound('Documento no encontrado.');
+    res.json({ versiones: rows.map((d) => ({ ...d, url: storage.getUrl(d.ruta_archivo) })) });
+  })
+);
+
+// POST /api/contratos/:id/generar-documento - puebla la plantilla del tipo de contrato con
+// los datos capturados y agrega el resultado al expediente (nueva versión si ya se había
+// generado antes desde plantilla para este contrato; documento nuevo si es la primera vez).
+router.post(
+  '/:id/generar-documento',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const contrato = await cargarContrato(req.params.id);
+    if (!contrato) throw notFound('Contrato no encontrado.');
+
+    const { rows: tipoRows } = await query('SELECT * FROM tipos_contrato WHERE id = $1', [contrato.tipo_contrato_id]);
+    const tipoContrato = tipoRows[0];
+    const { rows: plantillaRows } = await query(
+      'SELECT * FROM plantillas_tipo_contrato WHERE tipo_contrato_id = $1',
+      [contrato.tipo_contrato_id]
+    );
+    const plantilla = plantillaRows[0];
+    if (!plantilla) {
+      throw badRequest('Este tipo de contrato no tiene una plantilla configurada. Súbela desde Administración → Tipos de contrato.');
+    }
+
+    let franquicia = null;
+    if (tipoContrato?.es_franquicia) {
+      const { rows: franquiciaRows } = await query(
+        'SELECT * FROM contrato_franquicia_detalles WHERE contrato_id = $1',
+        [contrato.id]
+      );
+      franquicia = franquiciaRows[0] || null;
+    }
+
+    const bufferPlantilla = await fs.promises.readFile(storage.absolutePath(plantilla.ruta_archivo));
+    const datos = datosParaPlantilla({ contrato, tipoContrato, franquicia });
+    const bufferGenerado = renderizarPlantilla(bufferPlantilla, datos);
+
+    const nombreSeguro = `${contrato.folio} - ${tipoContrato.nombre}`.replace(/[\\/:*?"<>|]/g, '-');
+    const rutaArchivo = await storage.save({
+      buffer: bufferGenerado,
+      originalname: `${nombreSeguro}.docx`,
+      contratoId: contrato.id,
+    });
+
+    try {
+      const documento = await withTransaction(async (client) => {
+        const { rows: anteriorRows } = await client.query(
+          `SELECT * FROM contrato_documentos
+           WHERE contrato_id = $1 AND origen = 'plantilla' AND es_version_actual = true`,
+          [contrato.id]
+        );
+        const anterior = anteriorRows[0];
+
+        if (anterior) {
+          await client.query('UPDATE contrato_documentos SET es_version_actual = false WHERE id = $1', [anterior.id]);
+          const { rows } = await client.query(
+            `INSERT INTO contrato_documentos
+               (contrato_id, nombre_archivo, ruta_archivo, categoria, subido_por_id, grupo_id, version, reemplaza_a_id, es_version_actual, origen)
+             VALUES ($1, $2, $3, 'borrador', $4, $5, $6, $7, true, 'plantilla') RETURNING *`,
+            [contrato.id, `${nombreSeguro}.docx`, rutaArchivo, req.usuario.id, anterior.grupo_id, anterior.version + 1, anterior.id]
+          );
+          return rows[0];
+        }
+
+        const { rows } = await client.query(
+          `INSERT INTO contrato_documentos
+             (contrato_id, nombre_archivo, ruta_archivo, categoria, subido_por_id, grupo_id, version, origen)
+           VALUES ($1, $2, $3, 'borrador', $4, gen_random_uuid(), 1, 'plantilla') RETURNING *`,
+          [contrato.id, `${nombreSeguro}.docx`, rutaArchivo, req.usuario.id]
+        );
+        return rows[0];
+      });
+
+      await registrarAuditoria({
+        contratoId: contrato.id,
+        usuarioId: req.usuario.id,
+        accion: 'documento_generado_plantilla',
+        detalle: `Documento generado desde la plantilla de "${tipoContrato.nombre}" (versión ${documento.version}).`,
+      });
+      res.status(201).json({ documento: { ...documento, url: storage.getUrl(documento.ruta_archivo) } });
+    } catch (err) {
+      await storage.delete(rutaArchivo).catch(() => {});
+      const traducido = traducirErrorPostgres(err);
+      if (traducido) throw traducido;
+      throw err;
+    }
   })
 );
 
