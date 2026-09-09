@@ -42,13 +42,6 @@ export default function Dashboard() {
   const porVencer = resumen?.porVencerProximos || resumen?.contratosPorVencer || [];
   const pendientesAprobar = resumen?.misPendientesAprobar || [];
   const recientes = resumen?.misSolicitudesRecientes || [];
-  const franquiciasProximas = resumen?.franquiciasProximas || [];
-
-  const TIPO_EVENTO_FRANQUICIA = {
-    pago_regalias: 'Pago de regalías/mercadeo',
-    apertura: 'Fecha límite de apertura',
-    auditoria: 'Auditoría/inspección',
-  };
 
   const estatusKeys = Array.from(new Set([...ORDEN_ESTATUS, ...Object.keys(porEstatus)]));
 
@@ -159,52 +152,6 @@ export default function Dashboard() {
           )}
         </div>
       </div>
-
-      {franquiciasProximas.length > 0 && (
-        <div className="card">
-          <div className="card-title">
-            Avisos de franquicia próximos
-            <span className="tag-pill">{franquiciasProximas.length}</span>
-          </div>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Folio</th>
-                  <th>Evento</th>
-                  <th>Fecha</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {franquiciasProximas.map((ev) => {
-                  const dias = diasRestantes(ev.fecha);
-                  return (
-                    <tr key={`${ev.contratoId}-${ev.tipo}`}>
-                      <td>
-                        <div>{ev.folio}</div>
-                        <div className="muted" style={{ fontSize: 12 }}>{ev.titulo}</div>
-                      </td>
-                      <td>{TIPO_EVENTO_FRANQUICIA[ev.tipo] || ev.tipo}</td>
-                      <td>
-                        {formatFecha(ev.fecha)}
-                        {dias !== null && (
-                          <div className="muted" style={{ fontSize: 12 }}>
-                            {dias >= 0 ? `en ${dias} día${dias === 1 ? '' : 's'}` : `venció hace ${Math.abs(dias)} día${Math.abs(dias) === 1 ? '' : 's'}`}
-                          </div>
-                        )}
-                      </td>
-                      <td>
-                        <Link className="btn btn-secondary btn-sm" to={`/contratos/${ev.contratoId}`}>Ver</Link>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
 
       <div className="card">
         <div className="card-title">Mis solicitudes recientes</div>

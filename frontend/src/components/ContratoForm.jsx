@@ -16,7 +16,7 @@ const CAMPOS_FRANQUICIA_NUMERICOS = new Set([
   'diasAvisoAuditoria',
 ]);
 const CAMPOS_FRANQUICIA_TEXTO = [
-  'periodicidadPagoRegalias', 'fechaProximoPagoRegalias', 'territorio', 'direccionPunto',
+  'clubId', 'periodicidadPagoRegalias', 'fechaProximoPagoRegalias', 'territorio', 'direccionPunto',
   'fechaLimiteApertura', 'condicionesRenovacion', 'fechaProximaAuditoria', 'polizasSeguroRequeridas',
   'garanteNombre',
 ];
@@ -55,6 +55,7 @@ export function contratoFormVacio() {
     renovacionAutomatica: false,
     diasAvisoVencimiento: '30',
     // Datos de franquicia (solo se usan/envían si el tipo de contrato es de franquicia).
+    clubId: '',
     cuotaInicial: '',
     regaliasPorcentaje: '',
     fondoMercadeoPorcentaje: '',
@@ -77,12 +78,13 @@ export function contratoFormVacio() {
   };
 }
 
-export function validarContrato(valores) {
+export function validarContrato(valores, opciones = {}) {
   const errores = {};
   if (!valores.titulo?.trim()) errores.titulo = 'El título es obligatorio.';
   if (!valores.tipoContratoId) errores.tipoContratoId = 'Selecciona un tipo de contrato.';
   if (!valores.parte?.trim()) errores.parte = 'Indica qué parte de FPT contrata.';
   if (!valores.contraparteNombre?.trim()) errores.contraparteNombre = 'El nombre de la contraparte es obligatorio.';
+  if (opciones.requiereClub && !valores.clubId) errores.clubId = 'Selecciona el club.';
 
   if (valores.contraparteEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(valores.contraparteEmail)) {
     errores.contraparteEmail = 'Correo electrónico inválido.';
@@ -118,7 +120,7 @@ export function validarContrato(valores) {
   return errores;
 }
 
-export default function ContratoForm({ valores, onChange, errores = {}, tipos = [], disabled = false }) {
+export default function ContratoForm({ valores, onChange, errores = {}, tipos = [], clubes = [], disabled = false }) {
   function set(campo, valor) {
     onChange({ ...valores, [campo]: valor });
   }
@@ -315,6 +317,20 @@ export default function ContratoForm({ valores, onChange, errores = {}, tipos = 
           <p className="page-header-sub" style={{ marginTop: -8, marginBottom: 14 }}>
             Campos propios del contrato de franquicia: activan sus avisos automáticos por correo.
           </p>
+
+          <div className="field has-error-wrap" style={{ maxWidth: 380 }}>
+            <label htmlFor="clubId">Club *</label>
+            <select
+              id="clubId"
+              value={valores.clubId}
+              disabled={disabled}
+              onChange={(e) => set('clubId', e.target.value)}
+            >
+              <option value="">Selecciona un club…</option>
+              {clubes.map((cl) => <option key={cl.id} value={cl.id}>{cl.nombre}</option>)}
+            </select>
+            {errores.clubId && <div className="error-text">{errores.clubId}</div>}
+          </div>
 
           <h4 className="form-subheading">Términos financieros</h4>
           <div className="form-row-3">

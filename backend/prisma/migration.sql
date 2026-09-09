@@ -205,3 +205,24 @@ CREATE TABLE plantillas_tipo_contrato (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ---------------------------------------------------------------------------
+-- Módulo de franquicias: los contratos de franquicia (uno por club) se administran
+-- en su propio módulo (dashboard, listado y alta separados de "Contratos" general),
+-- visible solo para super_admin/admin/juridico. `clubes` es el catálogo de sucursales;
+-- cada contrato de franquicia se liga a exactamente un club vía
+-- contrato_franquicia_detalles.club_id (nullable a nivel de BD para no romper filas
+-- existentes creadas antes de este catálogo; el formulario de alta del módulo lo exige).
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE clubes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  nombre TEXT UNIQUE NOT NULL,
+  direccion TEXT,
+  activo BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE contrato_franquicia_detalles ADD COLUMN club_id UUID REFERENCES clubes(id);
+CREATE INDEX idx_franquicia_club ON contrato_franquicia_detalles(club_id);

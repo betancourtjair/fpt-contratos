@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, unwrap } from '../../api.js';
-import ContratoForm, { contratoFormVacio, validarContrato, franquiciaPayload } from '../../components/ContratoForm.jsx';
+import ContratoForm, { contratoFormVacio, validarContrato } from '../../components/ContratoForm.jsx';
 
 export default function NuevaSolicitud() {
   const navigate = useNavigate();
@@ -13,7 +13,10 @@ export default function NuevaSolicitud() {
 
   useEffect(() => {
     api.get('/tipos-contrato')
-      .then((data) => setTipos((unwrap(data, 'tiposContrato') || []).filter((t) => t.activo !== false)))
+      .then((data) => setTipos(
+        // Los tipos de franquicia se solicitan desde su propio módulo (Franquicias), no aquí.
+        (unwrap(data, 'tiposContrato') || []).filter((t) => t.activo !== false && !t.esFranquicia)
+      ))
       .catch(() => {});
   }, []);
 
@@ -33,17 +36,6 @@ export default function NuevaSolicitud() {
       };
       const contrato = await api.post('/contratos', payload);
       const id = contrato?.id || contrato?.contrato?.id;
-
-      const tipoElegido = tipos.find((t) => t.id === valores.tipoContratoId);
-      if (id && tipoElegido?.esFranquicia) {
-        try {
-          await api.put(`/contratos/${id}/franquicia`, franquiciaPayload(valores));
-        } catch (err) {
-          // El contrato ya se creó; no bloqueamos la navegación por un error aquí, pero avisamos.
-          setErrorGeneral(`El borrador se creó, pero no se pudieron guardar los datos de franquicia: ${err.message}`);
-        }
-      }
-
       navigate(id ? `/contratos/${id}` : '/contratos');
     } catch (err) {
       setErrorGeneral(err.message || 'No se pudo crear la solicitud.');

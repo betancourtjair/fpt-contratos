@@ -20,7 +20,7 @@ function NavItem({ to, children, end }) {
 }
 
 export default function Layout() {
-  const { usuario, logout, esAdmin } = useAuth();
+  const { usuario, logout, esAdmin, puedeFranquicias } = useAuth();
 
   return (
     <div className="app-shell">
@@ -40,6 +40,17 @@ export default function Layout() {
           <NavItem to="/contratos">Contratos</NavItem>
           <NavItem to="/contratos/nueva">Nueva solicitud</NavItem>
         </nav>
+
+        {puedeFranquicias && (
+          <>
+            <div className="sidebar-section-label">Franquicias</div>
+            <nav className="sidebar-nav">
+              <NavItem to="/franquicias" end>Dashboard</NavItem>
+              <NavItem to="/franquicias/nueva">Nueva solicitud</NavItem>
+              <NavItem to="/franquicias/clubes">Clubes</NavItem>
+            </nav>
+          </>
+        )}
 
         {esAdmin && (
           <>

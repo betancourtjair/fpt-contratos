@@ -16,6 +16,8 @@ const contratosRoutes = require('./routes/contratos');
 const documentosRoutes = require('./routes/documentos');
 const dashboardRoutes = require('./routes/dashboard');
 const jobsRoutes = require('./routes/jobs');
+const clubesRoutes = require('./routes/clubes');
+const franquiciasRoutes = require('./routes/franquicias');
 const { iniciarProgramador } = require('./jobs/scheduler');
 
 const app = express();
@@ -45,6 +47,8 @@ app.use('/api/contratos', contratosRoutes);
 app.use('/api/documentos', documentosRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/jobs', jobsRoutes);
+app.use('/api/clubes', clubesRoutes);
+app.use('/api/franquicias', franquiciasRoutes);
 
 // 404
 app.use((req, res) => {

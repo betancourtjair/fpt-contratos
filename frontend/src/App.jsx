@@ -9,6 +9,13 @@ import DetalleContrato from './pages/contratos/DetalleContrato.jsx';
 import TiposContrato from './pages/admin/TiposContrato.jsx';
 import FlujosAutorizacion from './pages/admin/FlujosAutorizacion.jsx';
 import Usuarios from './pages/admin/Usuarios.jsx';
+import DashboardFranquicias from './pages/franquicias/DashboardFranquicias.jsx';
+import NuevaSolicitudFranquicia from './pages/franquicias/NuevaSolicitudFranquicia.jsx';
+import Clubes from './pages/franquicias/Clubes.jsx';
+
+// El módulo de Franquicias es exclusivo de super_admin/admin/juridico (separado del resto
+// de Contratos/Dashboard, que sí ven otros roles).
+const ROLES_FRANQUICIAS = ['super_admin', 'admin', 'juridico'];
 
 export default function App() {
   return (
@@ -27,6 +34,31 @@ export default function App() {
         <Route path="contratos" element={<ListaContratos />} />
         <Route path="contratos/nueva" element={<NuevaSolicitud />} />
         <Route path="contratos/:id" element={<DetalleContrato />} />
+
+        <Route
+          path="franquicias"
+          element={
+            <ProtectedRoute roles={ROLES_FRANQUICIAS}>
+              <DashboardFranquicias />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="franquicias/nueva"
+          element={
+            <ProtectedRoute roles={ROLES_FRANQUICIAS}>
+              <NuevaSolicitudFranquicia />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="franquicias/clubes"
+          element={
+            <ProtectedRoute roles={ROLES_FRANQUICIAS}>
+              <Clubes />
+            </ProtectedRoute>
+          }
+        />
 
         <Route
           path="admin/tipos-contrato"

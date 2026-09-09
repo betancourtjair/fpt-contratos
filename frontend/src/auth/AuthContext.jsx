@@ -50,10 +50,12 @@ export function AuthProvider({ children }) {
   }, []);
 
   const esAdmin = usuario && ['admin', 'super_admin'].includes(usuario.rol);
+  // Quién puede entrar al módulo de Franquicias (dashboard, nueva solicitud, clubes).
+  const puedeFranquicias = usuario && ['super_admin', 'admin', 'juridico'].includes(usuario.rol);
 
   const value = useMemo(
-    () => ({ usuario, cargando, login, logout, esAdmin }),
-    [usuario, cargando, login, logout, esAdmin]
+    () => ({ usuario, cargando, login, logout, esAdmin, puedeFranquicias }),
+    [usuario, cargando, login, logout, esAdmin, puedeFranquicias]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

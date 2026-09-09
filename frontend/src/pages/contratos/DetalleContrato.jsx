@@ -37,6 +37,7 @@ function contratoAValores(c, fd) {
     renovacionAutomatica: !!c.renovacionAutomatica,
     diasAvisoVencimiento: c.diasAvisoVencimiento ?? '',
     // Datos de franquicia (si el contrato no es de franquicia, fd viene vacío y se usan defaults).
+    clubId: fd.clubId || '',
     cuotaInicial: fd.cuotaInicial ?? '',
     regaliasPorcentaje: fd.regaliasPorcentaje ?? '',
     fondoMercadeoPorcentaje: fd.fondoMercadeoPorcentaje ?? '',
@@ -67,6 +68,7 @@ export default function DetalleContrato() {
   const [contrato, setContrato] = useState(null);
   const [franquicia, setFranquicia] = useState(null);
   const [tipos, setTipos] = useState([]);
+  const [clubes, setClubes] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
 
@@ -114,6 +116,14 @@ export default function DetalleContrato() {
       .then((data) => setTipos(unwrap(data, 'tiposContrato') || []))
       .catch(() => {});
   }, []);
+  // Solo se necesita el catálogo de clubes si este contrato es de franquicia (para el selector
+  // de club al editar sus datos).
+  useEffect(() => {
+    if (!contrato?.tipoContrato?.esFranquicia) return;
+    api.get('/clubes')
+      .then((data) => setClubes(unwrap(data, 'clubes') || []))
+      .catch(() => {});
+  }, [contrato?.tipoContrato?.esFranquicia]);
 
   const aprobaciones = contrato?.aprobaciones || [];
   const documentos = contrato?.documentos || [];
@@ -152,7 +162,8 @@ export default function DetalleContrato() {
 
   async function guardarEdicion(e) {
     e.preventDefault();
-    const erroresValidacion = validarContrato(valoresEdit);
+    const tipoElegidoValidacion = tipos.find((t) => t.id === valoresEdit.tipoContratoId);
+    const erroresValidacion = validarContrato(valoresEdit, { requiereClub: !!tipoElegidoValidacion?.esFranquicia });
     setErroresEdit(erroresValidacion);
     if (Object.keys(erroresValidacion).length > 0) return;
 
@@ -268,7 +279,7 @@ export default function DetalleContrato() {
 
             {editando ? (
               <form onSubmit={guardarEdicion}>
-                <ContratoForm valores={valoresEdit} onChange={setValoresEdit} errores={erroresEdit} tipos={tipos} />
+                <ContratoForm valores={valoresEdit} onChange={setValoresEdit} errores={erroresEdit} tipos={tipos} clubes={clubes} />
                 <div className="form-actions">
                   <button type="submit" className="btn btn-primary" disabled={guardando}>
                     {guardando ? 'Guardando…' : 'Guardar cambios'}
@@ -337,6 +348,10 @@ export default function DetalleContrato() {
                 </div>
               ) : (
                 <dl className="definition-grid">
+                  <div>
+                    <dt>Club</dt>
+                    <dd>{franquicia.clubNombre || '—'}</dd>
+                  </div>
                   <div>
                     <dt>Cuota inicial</dt>
                     <dd>{formatMonto(franquicia.cuotaInicial, contrato.moneda)}</dd>

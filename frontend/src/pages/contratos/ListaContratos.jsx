@@ -23,7 +23,9 @@ export default function ListaContratos() {
 
   useEffect(() => {
     api.get('/tipos-contrato', { activo: 'false' })
-      .then((data) => setTipos(unwrap(data, 'tiposContrato') || []))
+      // Los de franquicia no aparecen aquí: este listado los excluye (viven en su propio
+      // módulo), así que ofrecerlos como filtro nunca traería resultados.
+      .then((data) => setTipos((unwrap(data, 'tiposContrato') || []).filter((t) => !t.esFranquicia)))
       .catch(() => {});
   }, []);
 

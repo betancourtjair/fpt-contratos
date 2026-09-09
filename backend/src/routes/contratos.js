@@ -132,7 +132,9 @@ router.get(
     const { estatus, tipoContratoId, texto, proximosAVencer } = req.query;
     const usuario = req.usuario;
 
-    const condiciones = [];
+    // Los contratos de franquicia viven en su propio módulo (GET /api/franquicias), separado
+    // por completo del listado general de "Contratos" y del Dashboard principal.
+    const condiciones = ['tc.es_franquicia = false'];
     const valores = [];
     let i = 1;
 
@@ -253,7 +255,10 @@ router.get(
     let franquicia = null;
     if (tipoContrato?.es_franquicia) {
       const { rows: franquiciaRows } = await query(
-        'SELECT * FROM contrato_franquicia_detalles WHERE contrato_id = $1',
+        `SELECT fd.*, cl.nombre AS club_nombre
+         FROM contrato_franquicia_detalles fd
+         LEFT JOIN clubes cl ON cl.id = fd.club_id
+         WHERE fd.contrato_id = $1`,
         [contrato.id]
       );
       franquicia = franquiciaRows[0] || null;
@@ -273,7 +278,7 @@ router.get(
 // (solo aplica si el tipo de contrato está marcado es_franquicia)
 // ---------------------------------------------------------------------------
 const CAMPOS_FRANQUICIA = [
-  'cuotaInicial', 'regaliasPorcentaje', 'fondoMercadeoPorcentaje', 'periodicidadPagoRegalias',
+  'clubId', 'cuotaInicial', 'regaliasPorcentaje', 'fondoMercadeoPorcentaje', 'periodicidadPagoRegalias',
   'fechaProximoPagoRegalias', 'diasAvisoPagoRegalias', 'territorio', 'radioExclusividadKm',
   'direccionPunto', 'fechaLimiteApertura', 'diasAvisoApertura', 'numeroRenovacionesPermitidas',
   'condicionesRenovacion', 'diasAvisoRenovacion', 'fechaProximaAuditoria', 'diasAvisoAuditoria',
@@ -281,6 +286,7 @@ const CAMPOS_FRANQUICIA = [
 ];
 
 const MAPA_COLUMNAS_FRANQUICIA = {
+  clubId: 'club_id',
   cuotaInicial: 'cuota_inicial',
   regaliasPorcentaje: 'regalias_porcentaje',
   fondoMercadeoPorcentaje: 'fondo_mercadeo_porcentaje',
@@ -320,8 +326,10 @@ router.put(
     if (!contrato) throw notFound('Contrato no encontrado.');
 
     const esDueño = contrato.solicitado_por_id === req.usuario.id;
-    const esAdmin = ['super_admin', 'admin'].includes(req.usuario.rol);
-    if (!esAdmin) {
+    // El módulo de franquicias lo administran super_admin/admin/juridico por igual, no solo
+    // quien creó el borrador (a diferencia del resto de contratos, donde solo admin/super_admin
+    // pueden editar lo de otros).
+    if (!esRolPrivilegiado(req.usuario.rol)) {
       if (!esDueño) throw forbidden('No puedes editar los datos de franquicia de un contrato que no solicitaste.');
       if (contrato.estatus !== 'borrador') {
         throw forbidden('Solo se pueden editar los datos de franquicia mientras el contrato está en borrador.');
