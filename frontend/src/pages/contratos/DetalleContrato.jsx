@@ -82,6 +82,9 @@ export default function DetalleContrato() {
   const [comentarios, setComentarios] = useState('');
   const [decidiendo, setDecidiendo] = useState(false);
 
+  const [generandoDocumento, setGenerandoDocumento] = useState(false);
+  const [errorGenerarDocumento, setErrorGenerarDocumento] = useState('');
+
   const cargar = useCallback(async () => {
     setCargando(true);
     setError('');
@@ -208,6 +211,19 @@ export default function DetalleContrato() {
       setAccionErr(err.message || 'No se pudo registrar la decisión.');
     } finally {
       setDecidiendo(false);
+    }
+  }
+
+  async function handleGenerarDocumento() {
+    setErrorGenerarDocumento('');
+    setGenerandoDocumento(true);
+    try {
+      await api.post(`/contratos/${id}/generar-documento`);
+      await cargar();
+    } catch (err) {
+      setErrorGenerarDocumento(err.message || 'No se pudo generar el documento.');
+    } finally {
+      setGenerandoDocumento(false);
     }
   }
 
@@ -384,7 +400,20 @@ export default function DetalleContrato() {
           )}
 
           <div className="card">
-            <div className="card-title">Documentos del expediente</div>
+            <div className="card-title">
+              Documentos del expediente
+              {contrato.tipoContrato?.plantillaNombreArchivo && (
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={handleGenerarDocumento}
+                  disabled={generandoDocumento}
+                  title={`Genera el documento desde la plantilla "${contrato.tipoContrato.plantillaNombreArchivo}" con los datos de este contrato.`}
+                >
+                  {generandoDocumento ? 'Generando…' : 'Generar documento desde plantilla'}
+                </button>
+              )}
+            </div>
+            {errorGenerarDocumento && <div className="alert alert-error">{errorGenerarDocumento}</div>}
             <DocumentosContrato contratoId={contrato.id} documentos={documentos} onSubido={cargar} />
           </div>
         </div>
