@@ -1,4 +1,8 @@
 const MONEDAS = ['MXN', 'USD'];
+const PARTES_FPT = [
+  'Fitness para todos, S. de R.L. de C.V.',
+  'Jeg-México Bueno, S. de R.L. de C.V.',
+];
 const PERIODICIDADES_REGALIAS = [
   { value: 'mensual', label: 'Mensual' },
   { value: 'trimestral', label: 'Trimestral' },
@@ -167,14 +171,15 @@ export default function ContratoForm({ valores, onChange, errores = {}, tipos = 
 
         <div className="field">
           <label htmlFor="parte">Parte que contrata (FPT) *</label>
-          <input
+          <select
             id="parte"
-            type="text"
             value={valores.parte}
             disabled={disabled}
             onChange={(e) => set('parte', e.target.value)}
-            placeholder="Ej. Fitness Para Todos S.A. de C.V."
-          />
+          >
+            <option value="">Selecciona una razón social…</option>
+            {PARTES_FPT.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
           {errores.parte && <div className="error-text">{errores.parte}</div>}
         </div>
       </div>
