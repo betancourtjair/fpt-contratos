@@ -10,6 +10,65 @@
 const GRAPH_BASE = 'https://graph.microsoft.com/v1.0';
 const LOGIN_BASE = 'https://login.microsoftonline.com';
 
+// Logo ya hospedado (mismo que usa la firma corporativa de Exchange), así que no depende de
+// que el dominio de GitHub Pages/dominio propio esté disponible para que el logo cargue en
+// el cliente de correo.
+const LOGO_URL = 'https://fpt.com.mx/PF.png';
+
+// Paleta morada de marca (frontend/src/styles/theme.css) reutilizada aquí para que los
+// correos automáticos tengan el mismo "look and feel" que el resto de la plataforma.
+const COLOR_MORADO_PRIMARIO = '#592c82';
+const COLOR_MORADO_OSCURO = '#2a0f42';
+const COLOR_MORADO_TEXTO_FOOTER = '#772583';
+const COLOR_MORADO_FONDO_CLARO = '#f6f2fa';
+
+/**
+ * Envuelve el HTML de un correo (el contenido específico de cada aviso, típicamente unos
+ * cuantos <p>) en la plantilla de marca de FPT: layout de tablas + estilos inline, para que
+ * se vea consistente en Outlook/Exchange (el cliente principal en la organización) y en el
+ * resto de clientes de correo. El logo va sobre una tarjeta blanca porque el PNG del logo
+ * tiene fondo transparente y se pierde sobre el header morado.
+ *
+ * @param {string} cuerpoHtml - HTML del contenido específico del aviso (ya viene con <p>, etc.)
+ */
+function envolverPlantilla(cuerpoHtml) {
+  return `<!DOCTYPE html>
+<html lang="es">
+  <body style="margin:0; padding:0; background:${COLOR_MORADO_FONDO_CLARO};">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${COLOR_MORADO_FONDO_CLARO}; padding:24px 12px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px; background:#ffffff; border-radius:10px; overflow:hidden; font-family:'Segoe UI', Arial, sans-serif;">
+            <tr>
+              <td align="center" style="background:${COLOR_MORADO_PRIMARIO}; padding:28px 24px;">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff; border-radius:8px;">
+                  <tr>
+                    <td style="padding:14px 22px;">
+                      <img src="${LOGO_URL}" width="150" alt="Fitness Para Todos" style="display:block; border:0; max-width:150px; height:auto;" />
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:32px 28px; color:${COLOR_MORADO_OSCURO}; font-family:'Segoe UI', Arial, sans-serif; font-size:14px; line-height:1.6;">
+                ${cuerpoHtml}
+              </td>
+            </tr>
+            <tr>
+              <td align="center" style="background:${COLOR_MORADO_FONDO_CLARO}; padding:16px 24px; color:${COLOR_MORADO_TEXTO_FOOTER}; font-family:'Segoe UI', Arial, sans-serif; font-size:12px; line-height:1.5;">
+                FPT Contratos &middot; Fitness Para Todos<br/>
+                Este es un correo automático, por favor no respondas a este mensaje.
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+}
+
 function graphConfigurado() {
   return Boolean(
     process.env.MS_GRAPH_CLIENT_ID &&
@@ -93,7 +152,9 @@ async function enviarCorreo(destinatario, asunto, cuerpoHtml) {
     const payload = {
       message: {
         subject: asunto,
-        body: { contentType: 'HTML', content: cuerpoHtml },
+        // Cada llamador solo arma el contenido específico del aviso (unos <p>); la plantilla
+        // de marca (logo, colores, footer) se aplica aquí una sola vez para todos los correos.
+        body: { contentType: 'HTML', content: envolverPlantilla(cuerpoHtml) },
         toRecipients: destinatarios.map((email) => ({ emailAddress: { address: email } })),
       },
       saveToSentItems: true,
@@ -121,4 +182,4 @@ async function enviarCorreo(destinatario, asunto, cuerpoHtml) {
   }
 }
 
-module.exports = { enviarCorreo, graphConfigurado };
+module.exports = { enviarCorreo, graphConfigurado, envolverPlantilla };

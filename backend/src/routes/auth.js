@@ -12,8 +12,8 @@ const router = express.Router();
 const ROLES_VALIDOS = ['super_admin', 'admin', 'juridico', 'aprobador', 'solicitante', 'lectura'];
 
 // URL del sitio para incluir en el correo de bienvenida. Configurable vía env (Render);
-// si no se define, cae al dominio de GitHub Pages donde vive el frontend.
-const FRONTEND_URL = process.env.FRONTEND_URL || 'https://betancourtjair.github.io/fpt-contratos/';
+// si no se define, cae al dominio propio de FPT Contratos.
+const FRONTEND_URL = process.env.FRONTEND_URL || 'https://contratos.fpt.com.mx/';
 
 function firmarToken(usuario) {
   return jwt.sign(
@@ -94,11 +94,23 @@ router.post(
       await enviarCorreo(
         usuarioCreado.email,
         'Acceso a FPT Contratos',
-        `<p>Se creó una cuenta para ti en <b>FPT Contratos</b>.</p>
-         <p><b>Sitio:</b> <a href="${FRONTEND_URL}">${FRONTEND_URL}</a><br/>
-         <b>Usuario (correo):</b> ${usuarioCreado.email}<br/>
-         <b>Contraseña temporal:</b> ${password}</p>
-         ${debeCambiarPassword ? '<p>Al iniciar sesión por primera vez se te pedirá cambiar esta contraseña.</p>' : ''}`
+        `<p style="margin:0 0 16px;">Se creó una cuenta para ti en <b>FPT Contratos</b>, la plataforma de gestión de contratos de Fitness Para Todos.</p>
+         <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#f6f2fa; border-radius:8px; margin:0 0 20px;">
+           <tr>
+             <td style="padding:16px 18px; font-size:14px; line-height:1.8;">
+               <b>Usuario (correo):</b> ${usuarioCreado.email}<br/>
+               <b>Contraseña temporal:</b> ${password}
+             </td>
+           </tr>
+         </table>
+         ${debeCambiarPassword ? '<p style="margin:0 0 20px;">Al iniciar sesión por primera vez se te pedirá cambiar esta contraseña.</p>' : ''}
+         <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+           <tr>
+             <td style="border-radius:6px; background:#592c82;">
+               <a href="${FRONTEND_URL}" style="display:inline-block; padding:12px 24px; color:#ffffff; font-weight:bold; text-decoration:none; font-size:14px;">Ir a FPT Contratos</a>
+             </td>
+           </tr>
+         </table>`
       );
     } catch (err) {
       console.error('Error enviando correo de bienvenida al usuario nuevo:', err);
