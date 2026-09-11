@@ -7,13 +7,32 @@
 // servidor: quien la invoque debe además envolverla en try/catch (ya se hace en las rutas
 // vía asyncHandler + try/catch puntual donde aplica).
 
+const fs = require('fs');
+const path = require('path');
+
 const GRAPH_BASE = 'https://graph.microsoft.com/v1.0';
 const LOGIN_BASE = 'https://login.microsoftonline.com';
 
-// Logo ya hospedado (mismo que usa la firma corporativa de Exchange), así que no depende de
-// que el dominio de GitHub Pages/dominio propio esté disponible para que el logo cargue en
-// el cliente de correo.
-const LOGO_URL = 'https://fpt.com.mx/PF.png';
+// Logo de cabecera del correo: se manda como adjunto inline (Content-ID) en vez de como
+// <img src="https://..."> externo, para que se vea igual en todos los clientes (Outlook de
+// escritorio en particular no siempre carga imágenes remotas por default) y no dependa de
+// que fpt.com.mx esté disponible. El archivo ya viene con fondo blanco (es un .jpg, sin
+// canal alpha), así que no hace falta ponerlo sobre una tarjeta como con el logo transparente.
+const LOGO_CONTENT_ID = 'logo-fpt-header';
+const LOGO_PATH = path.join(__dirname, 'assets', 'logo-correo.jpg');
+
+let logoBase64Cache = null;
+function obtenerLogoBase64() {
+  if (logoBase64Cache === null) {
+    try {
+      logoBase64Cache = fs.readFileSync(LOGO_PATH).toString('base64');
+    } catch (err) {
+      console.error('[email] No se pudo leer el logo del correo en', LOGO_PATH, err.message);
+      logoBase64Cache = '';
+    }
+  }
+  return logoBase64Cache;
+}
 
 // Paleta morada de marca (frontend/src/styles/theme.css) reutilizada aquí para que los
 // correos automáticos tengan el mismo "look and feel" que el resto de la plataforma.
@@ -44,7 +63,7 @@ function envolverPlantilla(cuerpoHtml) {
                 <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff; border-radius:8px;">
                   <tr>
                     <td style="padding:14px 22px;">
-                      <img src="${LOGO_URL}" width="150" alt="Fitness Para Todos" style="display:block; border:0; max-width:150px; height:auto;" />
+                      <img src="cid:${LOGO_CONTENT_ID}" width="150" alt="Fitness Para Todos" style="display:block; border:0; max-width:150px; height:auto;" />
                     </td>
                   </tr>
                 </table>
@@ -149,6 +168,8 @@ async function enviarCorreo(destinatario, asunto, cuerpoHtml) {
     const remitente = process.env.MS_GRAPH_SENDER_EMAIL;
     const url = `${GRAPH_BASE}/users/${encodeURIComponent(remitente)}/sendMail`;
 
+    const logoBase64 = obtenerLogoBase64();
+
     const payload = {
       message: {
         subject: asunto,
@@ -156,6 +177,23 @@ async function enviarCorreo(destinatario, asunto, cuerpoHtml) {
         // de marca (logo, colores, footer) se aplica aquí una sola vez para todos los correos.
         body: { contentType: 'HTML', content: envolverPlantilla(cuerpoHtml) },
         toRecipients: destinatarios.map((email) => ({ emailAddress: { address: email } })),
+        // Logo como adjunto inline referenciado por cid: en el HTML (ver envolverPlantilla).
+        // Si por algún motivo no se pudo leer el archivo del logo, se omite el adjunto en vez
+        // de tronar el envío; el correo sale sin logo en ese caso excepcional.
+        ...(logoBase64
+          ? {
+              attachments: [
+                {
+                  '@odata.type': '#microsoft.graph.fileAttachment',
+                  name: 'logo-fpt.jpg',
+                  contentType: 'image/jpeg',
+                  contentBytes: logoBase64,
+                  isInline: true,
+                  contentId: LOGO_CONTENT_ID,
+                },
+              ],
+            }
+          : {}),
       },
       saveToSentItems: true,
     };
