@@ -106,6 +106,46 @@ button { font-family: var(--font-body); }
   padding: 16px 20px 6px 20px;
 }
 
+/* Sección colapsable (acordeón) del menú lateral: el label se convierte en botón. */
+.sidebar-section-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-body);
+  text-align: left;
+}
+.sidebar-section-toggle:hover {
+  color: rgba(255,255,255,0.7);
+}
+
+.sidebar-chevron {
+  font-size: 10px;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+.sidebar-chevron.collapsed {
+  transform: rotate(-90deg);
+}
+
+.sidebar-collapsible {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.2s ease;
+}
+.sidebar-collapsible.collapsed {
+  grid-template-rows: 0fr;
+}
+.sidebar-collapsible > .sidebar-nav {
+  overflow: hidden;
+  min-height: 0;
+}
+
 .sidebar-nav {
   display: flex;
   flex-direction: column;
@@ -737,4 +777,76 @@ tbody tr:hover { background: var(--fpt-purple-50); }
   justify-content: flex-end;
   gap: 10px;
   margin-top: 18px;
+}
+
+/* ---------- Búsqueda avanzada ---------- */
+
+.search-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+}
+.search-grid .field { margin-bottom: 0; }
+
+.estatus-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.estatus-check-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--color-text);
+}
+.estatus-check-item input { width: auto; }
+
+.range-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.range-row input { width: 100%; }
+.range-row span {
+  color: var(--color-text-soft);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0 4px 0;
+}
+
+.search-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.results-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0 10px 0;
+  flex-wrap: wrap;
+}
+
+.sortable-th {
+  cursor: pointer;
+  user-select: none;
+}
+.sortable-th:hover { color: var(--color-text); }
+.sort-arrow {
+  margin-left: 4px;
+  font-size: 10px;
+  opacity: 0.7;
 }

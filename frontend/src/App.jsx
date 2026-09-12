@@ -4,6 +4,7 @@ import Layout from './components/Layout.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import ListaContratos from './pages/contratos/ListaContratos.jsx';
+import BusquedaAvanzada from './pages/contratos/BusquedaAvanzada.jsx';
 import NuevaSolicitud from './pages/contratos/NuevaSolicitud.jsx';
 import DetalleContrato from './pages/contratos/DetalleContrato.jsx';
 import TiposContrato from './pages/admin/TiposContrato.jsx';
@@ -41,6 +42,7 @@ export default function App() {
         <Route path="solicitudes" element={<ListaContratos vista="solicitudes" />} />
         <Route path="contratos-vigentes" element={<ListaContratos vista="vigentes" />} />
         <Route path="archivo" element={<ListaContratos vista="archivo" />} />
+        <Route path="busqueda" element={<BusquedaAvanzada />} />
         <Route path="contratos/nueva" element={<NuevaSolicitud />} />
         <Route path="contratos/:id" element={<DetalleContrato />} />
 

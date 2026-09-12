@@ -129,11 +129,29 @@ router.post(
 // ---------------------------------------------------------------------------
 // GET /api/contratos - listado con filtros, role-aware
 // ---------------------------------------------------------------------------
+// Columnas por las que se puede ordenar el listado (whitelist: nunca se interpola
+// directamente el valor de orderBy en el SQL, para evitar inyección).
+const COLUMNAS_ORDEN = {
+  folio: 'c.folio',
+  titulo: 'c.titulo',
+  contraparteNombre: 'c.contraparte_nombre',
+  monto: 'c.monto',
+  fechaInicio: 'c.fecha_inicio',
+  fechaFin: 'c.fecha_fin',
+  estatus: 'c.estatus',
+  createdAt: 'c.created_at',
+};
+
 router.get(
   '/',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { estatus, estatusIn, tipoContratoId, texto, proximosAVencer } = req.query;
+    const {
+      estatus, estatusIn, tipoContratoId, texto, proximosAVencer,
+      parte, moneda, montoMin, montoMax,
+      fechaInicioDesde, fechaInicioHasta, fechaFinDesde, fechaFinHasta,
+      orderBy, orderDir,
+    } = req.query;
     const usuario = req.usuario;
 
     // Los contratos de franquicia viven en su propio módulo (GET /api/franquicias), separado
@@ -154,7 +172,7 @@ router.get(
       valores.push(estatus);
     }
     // estatusIn: lista separada por comas (p.ej. "activo,por_vencer") para las vistas de
-    // Solicitudes / Contratos vigentes / Archivo, que agrupan varios estatus a la vez.
+    // Solicitudes / Contratos vigentes / Archivo, y para la búsqueda avanzada (multi-select).
     if (estatusIn) {
       const lista = String(estatusIn).split(',').map((s) => s.trim()).filter(Boolean);
       if (lista.length > 0) {
@@ -167,9 +185,49 @@ router.get(
       valores.push(tipoContratoId);
     }
     if (texto) {
-      condiciones.push(`(c.titulo ILIKE $${i} OR c.contraparte_nombre ILIKE $${i} OR c.folio ILIKE $${i})`);
+      condiciones.push(
+        `(c.titulo ILIKE $${i} OR c.contraparte_nombre ILIKE $${i} OR c.folio ILIKE $${i} OR c.contraparte_rfc ILIKE $${i})`
+      );
       valores.push(`%${texto}%`);
       i++;
+    }
+    if (parte) {
+      condiciones.push(`c.parte = $${i++}`);
+      valores.push(parte);
+    }
+    if (moneda) {
+      condiciones.push(`c.moneda = $${i++}`);
+      valores.push(moneda);
+    }
+    if (montoMin !== undefined && montoMin !== '') {
+      const num = Number(montoMin);
+      if (!Number.isNaN(num)) {
+        condiciones.push(`c.monto >= $${i++}`);
+        valores.push(num);
+      }
+    }
+    if (montoMax !== undefined && montoMax !== '') {
+      const num = Number(montoMax);
+      if (!Number.isNaN(num)) {
+        condiciones.push(`c.monto <= $${i++}`);
+        valores.push(num);
+      }
+    }
+    if (fechaInicioDesde) {
+      condiciones.push(`c.fecha_inicio >= $${i++}`);
+      valores.push(fechaInicioDesde);
+    }
+    if (fechaInicioHasta) {
+      condiciones.push(`c.fecha_inicio <= $${i++}`);
+      valores.push(fechaInicioHasta);
+    }
+    if (fechaFinDesde) {
+      condiciones.push(`c.fecha_fin >= $${i++}`);
+      valores.push(fechaFinDesde);
+    }
+    if (fechaFinHasta) {
+      condiciones.push(`c.fecha_fin <= $${i++}`);
+      valores.push(fechaFinHasta);
     }
     if (proximosAVencer === 'true') {
       condiciones.push(
@@ -178,6 +236,9 @@ router.get(
       );
     }
 
+    const columnaOrden = COLUMNAS_ORDEN[orderBy] || 'c.created_at';
+    const direccionOrden = String(orderDir).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+
     const where = condiciones.length ? `WHERE ${condiciones.join(' AND ')}` : '';
     const { rows } = await query(
       `SELECT c.*, tc.nombre AS tipo_contrato_nombre, u.nombre AS solicitado_por_nombre
@@ -185,7 +246,7 @@ router.get(
        JOIN tipos_contrato tc ON tc.id = c.tipo_contrato_id
        JOIN usuarios u ON u.id = c.solicitado_por_id
        ${where}
-       ORDER BY c.created_at DESC`,
+       ORDER BY ${columnaOrden} ${direccionOrden} NULLS LAST`,
       valores
     );
     res.json({ contratos: rows });
