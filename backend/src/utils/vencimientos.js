@@ -14,6 +14,7 @@ const { query, withTransaction } = require('../db');
 const { registrarAuditoria } = require('./audit');
 const { enviarCorreo } = require('../email');
 const { obtenerCorreosJuridicoAdmin, formatFecha } = require('./notificaciones');
+const { sincronizarEstatusEnDocumentos } = require('./documentosMetadatos');
 
 async function revisarVencimientos() {
   const resumen = { marcadosVencido: [], marcadosPorVencer: [] };
@@ -81,6 +82,9 @@ async function revisarVencimientos() {
   ];
 
   for (const { contrato, tipo } of todos) {
+    // Mantiene al día la columna "EstatusContrato" en SharePoint. Nunca debe tumbar el job.
+    await sincronizarEstatusEnDocumentos(contrato.id, tipo);
+
     try {
       const { rows } = await query('SELECT email FROM usuarios WHERE id = $1', [contrato.solicitado_por_id]);
       const solicitanteEmail = rows[0]?.email;

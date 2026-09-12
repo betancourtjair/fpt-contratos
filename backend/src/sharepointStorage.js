@@ -163,9 +163,49 @@ async function subirArchivo(token, driveId, carpetaId, nombreArchivo, buffer) {
   return subidaResp.json(); // driveItem: { id, webUrl, ... }
 }
 
+// Metadatos que se reflejan como columnas en la biblioteca de SharePoint (ver
+// otorgar-columnas-metadata.ps1 para crearlas una sola vez). Nombres internos de columna
+// distintos de "Título" a propósito, para no chocar con la columna interna "Title" que ya
+// trae por default toda biblioteca de documentos de SharePoint.
+function construirCampos(metadatos) {
+  const campos = {};
+  if (metadatos?.folio) campos.Folio = metadatos.folio;
+  if (metadatos?.tituloContrato) campos.TituloContrato = metadatos.tituloContrato;
+  if (metadatos?.contraparteNombre) campos.Contraparte = metadatos.contraparteNombre;
+  if (metadatos?.estatusLabel) campos.EstatusContrato = metadatos.estatusLabel;
+  return campos;
+}
+
+/**
+ * Escribe los metadatos en el listItem asociado a un archivo recién subido. Si las columnas
+ * todavía no existen en la biblioteca (no se ha corrido el script de setup) o falla la
+ * llamada por cualquier otra razón, se registra el error pero NO se revierte la subida: el
+ * archivo ya quedó guardado y es más importante no bloquear al usuario por esto.
+ */
+async function establecerMetadatos(token, driveId, itemId, metadatos) {
+  const campos = construirCampos(metadatos);
+  if (Object.keys(campos).length === 0) return;
+  try {
+    const resp = await fetch(`${GRAPH_BASE}/drives/${driveId}/items/${itemId}/listItem/fields`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(campos),
+    });
+    if (!resp.ok) {
+      console.error(
+        `[sharepointStorage] No se pudieron establecer los metadatos del documento (${resp.status}):`,
+        await resp.text().catch(() => '')
+      );
+    }
+  } catch (err) {
+    console.error('[sharepointStorage] Error al establecer metadatos del documento:', err.message);
+  }
+}
+
 /**
  * @param {{ buffer?: Buffer, path?: string, originalname: string,
- *           tipoContratoNombre?: string, folio?: string }} file
+ *           tipoContratoNombre?: string, folio?: string, tituloContrato?: string,
+ *           contraparteNombre?: string, estatusLabel?: string }} file
  */
 async function save(file) {
   if (!configurado()) {
@@ -187,7 +227,44 @@ async function save(file) {
   ]);
   const item = await subirArchivo(token, driveId, carpetaId, file.originalname || 'documento', buffer);
 
+  await establecerMetadatos(token, driveId, item.id, {
+    folio: file.folio,
+    tituloContrato: file.tituloContrato,
+    contraparteNombre: file.contraparteNombre,
+    estatusLabel: file.estatusLabel,
+  });
+
   return `${PREFIJO}${item.id}:${encodeURIComponent(item.webUrl)}`;
+}
+
+/**
+ * Actualiza únicamente los metadatos (sin volver a subir el archivo) de un documento ya
+ * existente, identificado por su clave "sharepoint:<itemId>:<url>". Se usa para mantener al
+ * día la columna EstatusContrato cuando el contrato cambia de estatus después de subido el
+ * documento (ver utils/documentosMetadatos.js).
+ */
+async function actualizarCampos(clave, metadatos) {
+  if (!configurado()) return;
+  const campos = construirCampos(metadatos);
+  if (Object.keys(campos).length === 0) return;
+  try {
+    const token = await obtenerToken();
+    const driveId = await obtenerDriveId(token);
+    const itemId = idDesdeClave(clave);
+    const resp = await fetch(`${GRAPH_BASE}/drives/${driveId}/items/${itemId}/listItem/fields`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(campos),
+    });
+    if (!resp.ok) {
+      console.error(
+        `[sharepointStorage] No se pudo actualizar el estatus en SharePoint (${resp.status}):`,
+        await resp.text().catch(() => '')
+      );
+    }
+  } catch (err) {
+    console.error('[sharepointStorage] Error al actualizar metadatos existentes:', err.message);
+  }
 }
 
 /** Síncrono: la url ya viaja embebida en la clave desde que se guardó, sin llamar a Graph. */
@@ -222,4 +299,4 @@ async function eliminar(clave) {
   }
 }
 
-module.exports = { save, getUrl, delete: eliminar, configurado };
+module.exports = { save, getUrl, delete: eliminar, configurado, actualizarCampos };

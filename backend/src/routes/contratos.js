@@ -21,6 +21,8 @@ const storage = require('../storage');
 const storageContratos = require('../storageContratos');
 const { condicionVisibilidad } = require('../utils/visibilidad');
 const { datosParaPlantilla, renderizarPlantilla } = require('../utils/plantillas');
+const { estatusLabel } = require('../utils/estatusLabels');
+const { sincronizarEstatusEnDocumentos } = require('../utils/documentosMetadatos');
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -581,6 +583,10 @@ router.post(
       return { contrato: rows[0], pasoActual: pasoActualRows[0] };
     });
 
+    // Mantiene al día la columna "EstatusContrato" en SharePoint (si el contrato ya tiene
+    // documentos subidos). Nunca debe tumbar el flujo si falla.
+    await sincronizarEstatusEnDocumentos(resultado.contrato.id, resultado.contrato.estatus);
+
     // Notificación por correo fuera de la transacción (no debe hacer rollback si falla).
     try {
       const destinatarios = await destinatariosDePaso({ query }, resultado.pasoActual);
@@ -709,6 +715,11 @@ router.post(
       return { contrato: contratoActualizado, aprobacion: { ...aprobacion, decision, comentarios }, notificacion };
     });
 
+    // Mantiene al día la columna "EstatusContrato" en SharePoint (rechazado/activo cambian
+    // el estatus del contrato; en un paso intermedio queda igual, y volver a escribir el
+    // mismo valor no hace daño). Nunca debe tumbar el flujo si falla.
+    await sincronizarEstatusEnDocumentos(resultado.contrato.id, resultado.contrato.estatus);
+
     // Notificaciones por correo, fuera de la transacción.
     try {
       if (resultado.notificacion?.tipo === 'siguiente_paso') {
@@ -788,6 +799,9 @@ router.post(
       contratoId: contrato.id,
       tipoContratoNombre: tipoRowsDoc[0]?.nombre,
       folio: contrato.folio,
+      tituloContrato: contrato.titulo,
+      contraparteNombre: contrato.contraparte_nombre,
+      estatusLabel: estatusLabel(contrato.estatus),
     });
 
     try {
@@ -912,6 +926,9 @@ router.post(
       contratoId: contrato.id,
       tipoContratoNombre: tipoContrato.nombre,
       folio: contrato.folio,
+      tituloContrato: contrato.titulo,
+      contraparteNombre: contrato.contraparte_nombre,
+      estatusLabel: estatusLabel(contrato.estatus),
     });
 
     try {

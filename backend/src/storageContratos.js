@@ -46,4 +46,13 @@ async function eliminar(clave) {
   return esClaveSharePoint(clave) ? sharepoint.delete(clave) : storageLocal.delete(clave);
 }
 
-module.exports = { save, getUrl, delete: eliminar };
+// Actualiza metadatos (Folio/Título/Contraparte/Estatus) de un documento ya subido, sin
+// volver a subir el archivo. El storage local no tiene metadatos que actualizar, así que
+// para una clave local esto simplemente no hace nada.
+async function actualizarMetadatos(clave, metadatos) {
+  if (esClaveSharePoint(clave)) {
+    return sharepoint.actualizarCampos(clave, metadatos);
+  }
+}
+
+module.exports = { save, getUrl, delete: eliminar, actualizarMetadatos };
