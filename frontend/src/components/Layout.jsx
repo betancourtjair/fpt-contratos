@@ -37,7 +37,9 @@ export default function Layout() {
 
         <nav className="sidebar-nav">
           <NavItem to="/" end>Dashboard</NavItem>
-          <NavItem to="/contratos">Contratos</NavItem>
+          <NavItem to="/solicitudes">Solicitudes</NavItem>
+          <NavItem to="/contratos-vigentes">Contratos vigentes</NavItem>
+          <NavItem to="/archivo">Archivo</NavItem>
           <NavItem to="/contratos/nueva">Nueva solicitud</NavItem>
         </nav>
 

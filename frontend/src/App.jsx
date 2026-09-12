@@ -33,7 +33,14 @@ export default function App() {
       >
         <Route index element={<Dashboard />} />
         <Route path="cambiar-password" element={<CambiarPassword />} />
-        <Route path="contratos" element={<ListaContratos />} />
+        {/* "Contratos" se dividió en tres vistas por bloque de estatus (ver ListaContratos.jsx):
+            Solicitudes (borrador/en_revision/en_autorizacion/rechazado), Contratos vigentes
+            (autorizado/activo/por_vencer) y Archivo (vencido/cancelado). La ruta vieja
+            /contratos redirige a Solicitudes por si queda algún enlace o marcador viejo. */}
+        <Route path="contratos" element={<Navigate to="/solicitudes" replace />} />
+        <Route path="solicitudes" element={<ListaContratos vista="solicitudes" />} />
+        <Route path="contratos-vigentes" element={<ListaContratos vista="vigentes" />} />
+        <Route path="archivo" element={<ListaContratos vista="archivo" />} />
         <Route path="contratos/nueva" element={<NuevaSolicitud />} />
         <Route path="contratos/:id" element={<DetalleContrato />} />
 

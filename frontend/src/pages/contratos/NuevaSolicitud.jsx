@@ -36,7 +36,7 @@ export default function NuevaSolicitud() {
       };
       const contrato = await api.post('/contratos', payload);
       const id = contrato?.id || contrato?.contrato?.id;
-      navigate(id ? `/contratos/${id}` : '/contratos');
+      navigate(id ? `/contratos/${id}` : '/solicitudes');
     } catch (err) {
       setErrorGeneral(err.message || 'No se pudo crear la solicitud.');
     } finally {

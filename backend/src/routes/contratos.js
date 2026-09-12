@@ -129,7 +129,7 @@ router.get(
   '/',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { estatus, tipoContratoId, texto, proximosAVencer } = req.query;
+    const { estatus, estatusIn, tipoContratoId, texto, proximosAVencer } = req.query;
     const usuario = req.usuario;
 
     // Los contratos de franquicia viven en su propio módulo (GET /api/franquicias), separado
@@ -148,6 +148,15 @@ router.get(
     if (estatus) {
       condiciones.push(`c.estatus = $${i++}`);
       valores.push(estatus);
+    }
+    // estatusIn: lista separada por comas (p.ej. "activo,por_vencer") para las vistas de
+    // Solicitudes / Contratos vigentes / Archivo, que agrupan varios estatus a la vez.
+    if (estatusIn) {
+      const lista = String(estatusIn).split(',').map((s) => s.trim()).filter(Boolean);
+      if (lista.length > 0) {
+        condiciones.push(`c.estatus = ANY($${i++})`);
+        valores.push(lista);
+      }
     }
     if (tipoContratoId) {
       condiciones.push(`c.tipo_contrato_id = $${i++}`);

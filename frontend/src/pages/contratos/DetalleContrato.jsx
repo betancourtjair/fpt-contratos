@@ -5,6 +5,7 @@ import { useAuth } from '../../auth/AuthContext.jsx';
 import Spinner from '../../components/Spinner.jsx';
 import EstatusBadge from '../../components/EstatusBadge.jsx';
 import ContratoForm, { validarContrato, franquiciaPayload } from '../../components/ContratoForm.jsx';
+import { rutaListaParaEstatus } from './ListaContratos.jsx';
 import AutorizacionTimeline from '../../components/AutorizacionTimeline.jsx';
 import DocumentosContrato from '../../components/DocumentosContrato.jsx';
 import { formatMonto, formatFecha } from '../../utils.js';
@@ -260,7 +261,7 @@ export default function DetalleContrato() {
               {enviandoAutorizacion ? 'Enviando…' : 'Enviar a autorización'}
             </button>
           )}
-          <button className="btn btn-secondary" onClick={() => navigate('/contratos')}>Volver al listado</button>
+          <button className="btn btn-secondary" onClick={() => navigate(rutaListaParaEstatus(contrato.estatus))}>Volver al listado</button>
         </div>
       </div>
 
