@@ -14,7 +14,11 @@ const {
   destinatariosDePaso,
 } = require('../utils/flujoEngine');
 const { enviarCorreo } = require('../email');
+// storage: solo para leer la plantilla Word del tipo de contrato (tipos_contrato), sin cambios.
 const storage = require('../storage');
+// storageContratos: documentos del EXPEDIENTE (contrato_documentos) — local o SharePoint según
+// CONTRATOS_STORAGE_DRIVER, ver storageContratos.js.
+const storageContratos = require('../storageContratos');
 const { condicionVisibilidad } = require('../utils/visibilidad');
 const { datosParaPlantilla, renderizarPlantilla } = require('../utils/plantillas');
 
@@ -250,7 +254,7 @@ router.get(
        ORDER BY d.created_at DESC`,
       [contrato.id]
     );
-    const documentosConUrl = documentos.map((d) => ({ ...d, url: storage.getUrl(d.ruta_archivo) }));
+    const documentosConUrl = documentos.map((d) => ({ ...d, url: storageContratos.getUrl(d.ruta_archivo) }));
 
     const { rows: tipoRows } = await query(
       `SELECT tc.*, p.nombre_archivo AS plantilla_nombre_archivo
@@ -714,10 +718,15 @@ router.post(
       }
     }
 
-    const rutaArchivo = await storage.save({
+    // El nombre del tipo de contrato solo se necesita para la estructura de carpetas cuando
+    // el driver activo es SharePoint (ver storageContratos.js); con el driver local se ignora.
+    const { rows: tipoRowsDoc } = await query('SELECT nombre FROM tipos_contrato WHERE id = $1', [contrato.tipo_contrato_id]);
+    const rutaArchivo = await storageContratos.save({
       buffer: req.file.buffer,
       originalname: req.file.originalname,
       contratoId: contrato.id,
+      tipoContratoNombre: tipoRowsDoc[0]?.nombre,
+      folio: contrato.folio,
     });
 
     try {
@@ -751,9 +760,9 @@ router.post(
           ? `Archivo "${req.file.originalname}" (categoría ${categoria}), versión ${documento.version} de "${anterior.nombre_archivo}".`
           : `Archivo "${req.file.originalname}" (categoría ${categoria}).`,
       });
-      res.status(201).json({ documento: { ...documento, url: storage.getUrl(documento.ruta_archivo) } });
+      res.status(201).json({ documento: { ...documento, url: storageContratos.getUrl(documento.ruta_archivo) } });
     } catch (err) {
-      await storage.delete(rutaArchivo).catch(() => {});
+      await storageContratos.delete(rutaArchivo).catch(() => {});
       const traducido = traducirErrorPostgres(err);
       if (traducido) throw traducido;
       throw err;
@@ -777,7 +786,7 @@ router.get(
        ORDER BY d.created_at DESC`,
       [contrato.id]
     );
-    res.json({ documentos: rows.map((d) => ({ ...d, url: storage.getUrl(d.ruta_archivo) })) });
+    res.json({ documentos: rows.map((d) => ({ ...d, url: storageContratos.getUrl(d.ruta_archivo) })) });
   })
 );
 
@@ -797,7 +806,7 @@ router.get(
       [contrato.id, req.params.grupoId]
     );
     if (rows.length === 0) throw notFound('Documento no encontrado.');
-    res.json({ versiones: rows.map((d) => ({ ...d, url: storage.getUrl(d.ruta_archivo) })) });
+    res.json({ versiones: rows.map((d) => ({ ...d, url: storageContratos.getUrl(d.ruta_archivo) })) });
   })
 );
 
@@ -836,10 +845,12 @@ router.post(
     const bufferGenerado = renderizarPlantilla(bufferPlantilla, datos);
 
     const nombreSeguro = `${contrato.folio} - ${tipoContrato.nombre}`.replace(/[\\/:*?"<>|]/g, '-');
-    const rutaArchivo = await storage.save({
+    const rutaArchivo = await storageContratos.save({
       buffer: bufferGenerado,
       originalname: `${nombreSeguro}.docx`,
       contratoId: contrato.id,
+      tipoContratoNombre: tipoContrato.nombre,
+      folio: contrato.folio,
     });
 
     try {
@@ -877,9 +888,9 @@ router.post(
         accion: 'documento_generado_plantilla',
         detalle: `Documento generado desde la plantilla de "${tipoContrato.nombre}" (versión ${documento.version}).`,
       });
-      res.status(201).json({ documento: { ...documento, url: storage.getUrl(documento.ruta_archivo) } });
+      res.status(201).json({ documento: { ...documento, url: storageContratos.getUrl(documento.ruta_archivo) } });
     } catch (err) {
-      await storage.delete(rutaArchivo).catch(() => {});
+      await storageContratos.delete(rutaArchivo).catch(() => {});
       const traducido = traducirErrorPostgres(err);
       if (traducido) throw traducido;
       throw err;
