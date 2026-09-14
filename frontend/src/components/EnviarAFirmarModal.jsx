@@ -22,7 +22,7 @@ export default function EnviarAFirmarModal({ contratoId, documento, onClose, onE
         const lista = unwrap(data, 'tipos') || [];
         setTipos(lista);
         setEntorno(data?.entorno);
-        if (lista.length > 0) setTipoDocumento(lista[0].id || lista[0].ID || '');
+        if (lista.length > 0) setTipoDocumento(lista[0].id || lista[0].Id || lista[0].ID || '');
       } catch (err) {
         if (!cancelado) setError(err.message || 'No se pudo cargar el catálogo de tipos de documento de doc2sign.');
       } finally {
@@ -103,7 +103,7 @@ export default function EnviarAFirmarModal({ contratoId, documento, onClose, onE
                 onChange={(e) => setTipoDocumento(e.target.value)}
               >
                 {tipos.map((t) => {
-                  const id = t.id || t.ID;
+                  const id = t.id || t.Id || t.ID;
                   const nombre = t.nombre || t.Nombre || id;
                   return <option key={id} value={id}>{nombre}</option>;
                 })}
