@@ -138,7 +138,7 @@ async function cargarDocumento(datos) {
   const infoDocumento = {
     type_code: 'empresa',
     userservices: userservices(),
-    usuarioIdcarga: userservices(),
+    usuarioIdcarga: '',
     base64PDFbase64: datos.base64PDF,
     nombreDocumento: datos.nombreDocumento,
     tipoDocumento: datos.tipoDocumento,
