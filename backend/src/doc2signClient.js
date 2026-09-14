@@ -31,6 +31,10 @@ const API_BASE = {
   test: 'https://api-rest-test.doc2sign.com/REST_Document',
   produccion: 'https://api-rest.doc2sign.com/REST_Document',
 };
+const API_BASE_CONNECT = {
+  test: 'https://api-rest-test.doc2sign.com/REST_Connect',
+  produccion: 'https://api-rest.doc2sign.com/REST_Connect',
+};
 
 function entorno() {
   return (process.env.DOC2SIGN_ENTORNO || 'test').toLowerCase() === 'produccion' ? 'produccion' : 'test';
@@ -79,10 +83,10 @@ async function obtenerToken() {
   return tokenCache.accessToken;
 }
 
-async function llamar(metodo, path, { body, query } = {}) {
+async function llamar(metodo, path, { body, query, base } = {}) {
   const env = entorno();
   const token = await obtenerToken();
-  let url = `${API_BASE[env]}/${path}`;
+  let url = `${(base || API_BASE)[env]}/${path}`;
   if (query) {
     url += `?${new URLSearchParams(query).toString()}`;
   }
@@ -117,6 +121,33 @@ function limpiarString(valor) {
   return valor.replace(/^"+|"+$/g, '').trim();
 }
 
+let usuarioIdCargaCache = { valor: null, entorno: null };
+
+/**
+ * Obtiene (y cachea) el GUID de un usuario real del portal de doc2sign para usar como
+ * "usuarioIdcarga" al cargar documentos. CargaDocumento2 exige ahí el ID de un usuario
+ * registrado en el portal (no el "usuario de servicio"/userservices) — mandar vacío o el
+ * usuario de servicio se rechaza ("011: El usuario creador no existe" / "Unrecognized Guid
+ * format"). Se usa el primer usuario que regrese ListaUsuarios de la cuenta.
+ */
+async function obtenerUsuarioIdCarga() {
+  const env = entorno();
+  if (usuarioIdCargaCache.valor && usuarioIdCargaCache.entorno === env) {
+    return usuarioIdCargaCache.valor;
+  }
+  const usuarios = await llamar('GET', 'ListaUsuarios', {
+    base: API_BASE_CONNECT,
+    query: { type_code: 'empresa', userservices: userservices() },
+  });
+  const lista = Array.isArray(usuarios) ? usuarios : [];
+  if (lista.length === 0) {
+    throw new Error('No hay ningún usuario registrado en la cuenta de doc2sign (ListaUsuarios regresó vacío); se necesita al menos uno para poder cargar documentos.');
+  }
+  const id = lista[0].UID || lista[0].uid || lista[0].Id || lista[0].id;
+  usuarioIdCargaCache = { valor: id, entorno: env };
+  return id;
+}
+
 /**
  * Envía un documento a firma (método "Carga de Documento 2" — permite firmantes sin cuenta en
  * doc2sign identificados solo por nombre/email, y usar los créditos de la empresa).
@@ -135,10 +166,12 @@ async function cargarDocumento(datos) {
     throw new Error('Se requiere al menos un firmante.');
   }
 
+  const usuarioIdcarga = await obtenerUsuarioIdCarga();
+
   const infoDocumento = {
     type_code: 'empresa',
     userservices: userservices(),
-    usuarioIdcarga: '',
+    usuarioIdcarga,
     base64PDFbase64: datos.base64PDF,
     nombreDocumento: datos.nombreDocumento,
     tipoDocumento: datos.tipoDocumento,
