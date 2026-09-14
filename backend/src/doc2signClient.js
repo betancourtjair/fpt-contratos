@@ -144,7 +144,7 @@ async function cargarDocumento(datos) {
     tipoDocumento: datos.tipoDocumento,
     ordenada: Boolean(datos.ordenada),
     firmantes: [],
-    firmanteSinRegistro: datos.firmantes.map((f) => ({
+    firmantesSinRegistro: datos.firmantes.map((f) => ({
       Nombres: f.nombres,
       ap_paterno: f.apellidoPaterno,
       ap_materno: f.apellidoMaterno || '',
