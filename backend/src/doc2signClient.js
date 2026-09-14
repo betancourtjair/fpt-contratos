@@ -142,7 +142,7 @@ async function cargarDocumento(datos) {
     base64PDFbase64: datos.base64PDF,
     nombreDocumento: datos.nombreDocumento,
     tipoDocumento: datos.tipoDocumento,
-    ordenada: datos.ordenada ? 1 : 0,
+    ordenada: Boolean(datos.ordenada),
     firmantes: [],
     firmanteSinRegistro: datos.firmantes.map((f) => ({
       Nombres: f.nombres,
