@@ -267,6 +267,21 @@ async function actualizarCampos(clave, metadatos) {
   }
 }
 
+/** Descarga el contenido del archivo (usado para mandarlo a firma vía doc2sign). */
+async function obtenerBuffer(clave) {
+  const token = await obtenerToken();
+  const driveId = await obtenerDriveId(token);
+  const itemId = idDesdeClave(clave);
+  const resp = await fetch(`${GRAPH_BASE}/drives/${driveId}/items/${itemId}/content`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!resp.ok) {
+    throw new Error(`No se pudo descargar el archivo de SharePoint (${resp.status}): ${await resp.text().catch(() => '')}`);
+  }
+  const arrayBuffer = await resp.arrayBuffer();
+  return Buffer.from(arrayBuffer);
+}
+
 /** Síncrono: la url ya viaja embebida en la clave desde que se guardó, sin llamar a Graph. */
 function getUrl(clave) {
   const resto = clave.slice(PREFIJO.length);
@@ -299,4 +314,4 @@ async function eliminar(clave) {
   }
 }
 
-module.exports = { save, getUrl, delete: eliminar, configurado, actualizarCampos };
+module.exports = { save, getUrl, delete: eliminar, configurado, actualizarCampos, obtenerBuffer };

@@ -17,9 +17,15 @@
 const cron = require('node-cron');
 const { revisarVencimientos } = require('../utils/vencimientos');
 const { revisarFranquicias } = require('../utils/franquicias');
+const { revisarPendientes: revisarFirmasPendientes } = require('../utils/firmaElectronica');
+const doc2sign = require('../doc2signClient');
 
 const ZONA_HORARIA = 'America/Mexico_City';
 const EXPRESION_DIARIA = '0 7 * * *'; // 07:00 todos los días
+// Firma electrónica: revisión más seguida que la diaria porque el webhook de doc2sign (ver
+// routes/doc2signWebhook.js) es el aviso "en vivo", pero esto es el respaldo por si algún aviso
+// no llega o el webhook todavía no se configuró en doc2sign.
+const EXPRESION_FIRMAS = '0 */2 * * *'; // cada 2 horas
 const RETRASO_INICIAL_MS = 15 * 1000; // 15s tras arrancar, para no competir con el boot del server
 
 let ejecutando = false;
@@ -58,18 +64,46 @@ async function ejecutarRevisionSegura(origen) {
   }
 }
 
+let revisandoFirmas = false;
+async function ejecutarRevisionFirmasSegura(origen) {
+  if (!doc2sign.configurado()) return; // integración no configurada: no hay nada que revisar
+  if (revisandoFirmas) {
+    console.log(`[scheduler] Revisión de firmas pendientes ya en curso, se omite el disparo desde "${origen}".`);
+    return;
+  }
+  revisandoFirmas = true;
+  try {
+    const resumen = await revisarFirmasPendientes();
+    if (resumen.revisados > 0) {
+      console.log(
+        `[scheduler] Revisión de firmas pendientes (${origen}) completada: ${resumen.revisados} documento(s) revisado(s), ` +
+        `${resumen.firmados} firmado(s), ${resumen.rechazados} rechazado(s).`
+      );
+    }
+  } catch (err) {
+    console.error(`[scheduler] Error al revisar firmas pendientes (${origen}):`, err);
+  } finally {
+    revisandoFirmas = false;
+  }
+}
+
 /** Arranca el programador. Llamar una sola vez, al iniciar el servidor real (no en tests). */
 function iniciarProgramador() {
   setTimeout(() => {
     ejecutarRevisionSegura('arranque del servidor');
+    ejecutarRevisionFirmasSegura('arranque del servidor');
   }, RETRASO_INICIAL_MS);
 
   cron.schedule(EXPRESION_DIARIA, () => ejecutarRevisionSegura('cron diario 07:00'), {
     timezone: ZONA_HORARIA,
   });
+  cron.schedule(EXPRESION_FIRMAS, () => ejecutarRevisionFirmasSegura('cron cada 2 horas'), {
+    timezone: ZONA_HORARIA,
+  });
 
   console.log(
-    `[scheduler] Programador iniciado: revisión de vencimientos y de franquicias al arrancar y todos los días a las 07:00 (${ZONA_HORARIA}).`
+    `[scheduler] Programador iniciado: revisión de vencimientos y de franquicias al arrancar y todos los días a las 07:00, ` +
+    `y revisión de firmas pendientes (doc2sign) al arrancar y cada 2 horas (${ZONA_HORARIA}).`
   );
 }
 

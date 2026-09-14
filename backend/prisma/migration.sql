@@ -233,3 +233,21 @@ CREATE INDEX idx_franquicia_club ON contrato_franquicia_detalles(club_id);
 -- forzar el cambio a usuarios ya existentes creados antes de este campo.
 -- ---------------------------------------------------------------------------
 ALTER TABLE usuarios ADD COLUMN debe_cambiar_password BOOLEAN NOT NULL DEFAULT false;
+
+-- ---------------------------------------------------------------------------
+-- Integración con doc2sign (firma electrónica NOM-151, ver backend/src/doc2signClient.js y
+-- backend/src/utils/firmaElectronica.js). Un documento del expediente (contrato_documentos) se
+-- puede mandar a firma; el resultado se guarda en las mismas filas para no crear un módulo
+-- aparte. doc2sign_firmado_en / doc2sign_rechazado_en son la marca de "ya no sigas revisando
+-- este documento" para el job periódico (NULL = todavía en proceso).
+-- ---------------------------------------------------------------------------
+ALTER TABLE contrato_documentos ADD COLUMN doc2sign_documento_id UUID;
+ALTER TABLE contrato_documentos ADD COLUMN doc2sign_estatus TEXT;
+ALTER TABLE contrato_documentos ADD COLUMN doc2sign_firmantes JSONB;
+ALTER TABLE contrato_documentos ADD COLUMN doc2sign_enviado_por_id UUID REFERENCES usuarios(id);
+ALTER TABLE contrato_documentos ADD COLUMN doc2sign_enviado_at TIMESTAMPTZ;
+ALTER TABLE contrato_documentos ADD COLUMN doc2sign_actualizado_at TIMESTAMPTZ;
+ALTER TABLE contrato_documentos ADD COLUMN doc2sign_firmado_en TIMESTAMPTZ;
+ALTER TABLE contrato_documentos ADD COLUMN doc2sign_rechazado_en TIMESTAMPTZ;
+CREATE INDEX idx_contrato_documentos_doc2sign_id ON contrato_documentos(doc2sign_documento_id)
+  WHERE doc2sign_documento_id IS NOT NULL;

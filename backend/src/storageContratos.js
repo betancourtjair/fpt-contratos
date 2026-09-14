@@ -55,4 +55,12 @@ async function actualizarMetadatos(clave, metadatos) {
   }
 }
 
-module.exports = { save, getUrl, delete: eliminar, actualizarMetadatos };
+/**
+ * Devuelve el contenido del archivo (Buffer), sin importar el driver. Se usa para mandar un
+ * documento del expediente a firma vía doc2sign (necesita los bytes en base64).
+ */
+async function obtenerBuffer(clave) {
+  return esClaveSharePoint(clave) ? sharepoint.obtenerBuffer(clave) : storageLocal.leerBuffer(clave);
+}
+
+module.exports = { save, getUrl, delete: eliminar, actualizarMetadatos, obtenerBuffer };

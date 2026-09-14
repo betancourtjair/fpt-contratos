@@ -60,6 +60,7 @@ model Usuario {
   contratosSolicitados Contrato[]            @relation("SolicitadoPor")
   aprobaciones         ContratoAprobacion[]   @relation("Aprobador")
   documentosSubidos    ContratoDocumento[]    @relation("SubidoPor")
+  documentosEnviadosAFirma ContratoDocumento[] @relation("Doc2signEnviadoPor")
   auditLogs            AuditLog[]
   pasosPorUsuario      FlujoPaso[]            @relation("AprobadorEspecifico")
 
@@ -184,8 +185,19 @@ model ContratoDocumento {
   subidoPorId   String
   createdAt     DateTime           @default(now())
 
-  contrato  Contrato @relation(fields: [contratoId], references: [id], onDelete: Cascade)
-  subidoPor Usuario  @relation("SubidoPor", fields: [subidoPorId], references: [id])
+  // Firma electrónica (doc2sign / NOM-151) — ver backend/src/doc2signClient.js.
+  doc2signDocumentoId    String?
+  doc2signEstatus        String?   // texto crudo devuelto por doc2sign (método "Estatus")
+  doc2signFirmantes      Json?     // snapshot de a quién se mandó a firmar
+  doc2signEnviadoPorId   String?
+  doc2signEnviadoAt      DateTime?
+  doc2signActualizadoAt  DateTime?
+  doc2signFirmadoEn      DateTime? // no-nulo = ya se descargó y versionó el PDF firmado
+  doc2signRechazadoEn    DateTime? // no-nulo = firma rechazada/cancelada, ya no se vuelve a revisar
+
+  contrato        Contrato @relation(fields: [contratoId], references: [id], onDelete: Cascade)
+  subidoPor       Usuario  @relation("SubidoPor", fields: [subidoPorId], references: [id])
+  doc2signEnviadoPor Usuario? @relation("Doc2signEnviadoPor", fields: [doc2signEnviadoPorId], references: [id])
 
   @@map("contrato_documentos")
 }

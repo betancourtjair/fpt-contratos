@@ -18,6 +18,7 @@ const dashboardRoutes = require('./routes/dashboard');
 const jobsRoutes = require('./routes/jobs');
 const clubesRoutes = require('./routes/clubes');
 const franquiciasRoutes = require('./routes/franquicias');
+const doc2signWebhookRoutes = require('./routes/doc2signWebhook');
 const { iniciarProgramador } = require('./jobs/scheduler');
 
 const app = express();
@@ -49,6 +50,9 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/jobs', jobsRoutes);
 app.use('/api/clubes', clubesRoutes);
 app.use('/api/franquicias', franquiciasRoutes);
+// Público (sin requireAuth): lo llama doc2sign, no un usuario de la app. Ver
+// src/routes/doc2signWebhook.js para el modelo de seguridad (header secreto opcional).
+app.use('/api/webhooks/doc2sign', doc2signWebhookRoutes);
 
 // 404
 app.use((req, res) => {

@@ -67,6 +67,11 @@ function driverLocal() {
     absolutePath(clave) {
       return path.join(UPLOADS_DIR, clave);
     },
+
+    /** Lee el archivo completo en memoria (usado para mandarlo a firma vía doc2sign). */
+    async leerBuffer(clave) {
+      return fs.promises.readFile(path.join(UPLOADS_DIR, clave));
+    },
   };
 }
 
@@ -88,4 +93,5 @@ module.exports = {
   getUrl: (clave) => driver.getUrl(clave),
   delete: (clave) => driver.delete(clave),
   absolutePath: (clave) => driver.absolutePath(clave),
+  leerBuffer: (clave) => driver.leerBuffer(clave),
 };

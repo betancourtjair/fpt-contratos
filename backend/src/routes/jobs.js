@@ -3,6 +3,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { revisarVencimientos } = require('../utils/vencimientos');
 const { revisarFranquicias } = require('../utils/franquicias');
+const { revisarPendientes: revisarFirmasPendientes } = require('../utils/firmaElectronica');
 
 const router = express.Router();
 
@@ -19,6 +20,20 @@ router.post(
     const vencimientos = await revisarVencimientos();
     const franquicias = await revisarFranquicias();
     res.json({ ...vencimientos, franquicias });
+  })
+);
+
+// POST /api/jobs/revisar-firmas-pendientes
+// Igual que arriba pero para documentos mandados a firmar vía doc2sign (ver
+// src/jobs/scheduler.js: corre sola al arrancar y cada 2 horas). Útil para forzar una revisión
+// inmediata en vez de esperar al webhook o al siguiente ciclo del cron.
+router.post(
+  '/revisar-firmas-pendientes',
+  requireAuth,
+  requireRole('super_admin', 'admin'),
+  asyncHandler(async (req, res) => {
+    const resumen = await revisarFirmasPendientes();
+    res.json(resumen);
   })
 );
 
