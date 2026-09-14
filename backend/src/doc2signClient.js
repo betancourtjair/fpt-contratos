@@ -177,20 +177,28 @@ async function cargarDocumento(datos) {
     tipoDocumento: datos.tipoDocumento,
     ordenada: Boolean(datos.ordenada),
     firmantes: [],
-    firmantesSinRegistro: datos.firmantes.map((f) => ({
+    // La cuenta tiene el tipo de documento "_Documento General" configurado en doc2sign como
+    // "Firmas por Definir", lo cual OBLIGA a mandar ubicacionFirmaPersonalizada:true con
+    // coordenadas reales (PosX/PosY/Pagina) por firmante — no se puede dejar que doc2sign las
+    // calcule solo (-1/-1/-1), esa combinación la rechaza con el error "029". Como esta app no
+    // tiene un editor visual para que el usuario marque el lugar exacto de la firma, se usa una
+    // posición por defecto en la esquina inferior izquierda de la última página, con cada firma
+    // adicional un poco más arriba para que no se encimen. Si en el futuro se requiere que el
+    // firmante elija el lugar exacto, aquí es donde hay que mandar sus coordenadas reales.
+    firmantesSinRegistro: datos.firmantes.map((f, idx) => ({
       Nombres: f.nombres,
       ap_paterno: f.apellidoPaterno,
       ap_materno: f.apellidoMaterno || '',
       email: f.email,
       OrdenDeFirma: f.orden,
-      PosX: -1,
-      PosY: -1,
-      Pagina: -1,
+      PosX: 100,
+      PosY: 100 + idx * 120,
+      Pagina: 1,
     })),
     interesados: [],
     addQR: datos.addQR ?? true,
     usaCreditosEmpresa: true,
-    ubicacionFirmaPersonalizada: false,
+    ubicacionFirmaPersonalizada: true,
   };
 
   const data = await llamar('POST', 'CargaDocumento2', { body: infoDocumento });
