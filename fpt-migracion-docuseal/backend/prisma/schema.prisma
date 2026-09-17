@@ -60,7 +60,7 @@ model Usuario {
   contratosSolicitados Contrato[]            @relation("SolicitadoPor")
   aprobaciones         ContratoAprobacion[]   @relation("Aprobador")
   documentosSubidos    ContratoDocumento[]    @relation("SubidoPor")
-  documentosEnviadosAFirma ContratoDocumento[] @relation("DocumensoEnviadoPor")
+  documentosEnviadosAFirma ContratoDocumento[] @relation("DocusealEnviadoPor")
   auditLogs            AuditLog[]
   pasosPorUsuario      FlujoPaso[]            @relation("AprobadorEspecifico")
 
@@ -185,20 +185,20 @@ model ContratoDocumento {
   subidoPorId   String
   createdAt     DateTime           @default(now())
 
-  // Firma electrónica (Documenso — self-hosted; ver backend/src/documensoClient.js). Firma
+  // Firma electrónica (DocuSeal — self-hosted; ver backend/src/docusealClient.js). Firma
   // electrónica SIMPLE, sin certificación NOM-151 (a diferencia del doc2sign anterior).
-  documensoSubmissionId   String?
-  documensoEstatus        String?   // "DRAFT" | "PENDING" | "COMPLETED" | "REJECTED" | "CANCELLED" (tal cual lo regresa Documenso)
-  documensoFirmantes      Json?     // snapshot de a quién se mandó a firmar
-  documensoEnviadoPorId   String?
-  documensoEnviadoAt      DateTime?
-  documensoActualizadoAt  DateTime?
-  documensoFirmadoEn      DateTime? // no-nulo = ya se descargó y versionó el PDF firmado
-  documensoRechazadoEn    DateTime? // no-nulo = firma rechazada o cancelada, ya no se vuelve a revisar
+  docusealSubmissionId   String?
+  docusealEstatus        String?   // "pending" | "completed" | "declined" | "expired" (tal cual lo regresa DocuSeal)
+  docusealFirmantes      Json?     // snapshot de a quién se mandó a firmar
+  docusealEnviadoPorId   String?
+  docusealEnviadoAt      DateTime?
+  docusealActualizadoAt  DateTime?
+  docusealFirmadoEn      DateTime? // no-nulo = ya se descargó y versionó el PDF firmado
+  docusealRechazadoEn    DateTime? // no-nulo = firma rechazada o vencida, ya no se vuelve a revisar
 
   contrato        Contrato @relation(fields: [contratoId], references: [id], onDelete: Cascade)
   subidoPor       Usuario  @relation("SubidoPor", fields: [subidoPorId], references: [id])
-  documensoEnviadoPor Usuario? @relation("DocumensoEnviadoPor", fields: [documensoEnviadoPorId], references: [id])
+  docusealEnviadoPor Usuario? @relation("DocusealEnviadoPor", fields: [docusealEnviadoPorId], references: [id])
 
   @@map("contrato_documentos")
 }

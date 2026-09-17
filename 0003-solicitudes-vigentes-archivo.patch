@@ -1,0 +1,271 @@
+From 0d6044f9f76dbe5e6810de361781577ab90b3ab3 Mon Sep 17 00:00:00 2001
+From: "Jair (FPT)" <jair@fpt.com.mx>
+Date: Sat, 12 Sep 2026 01:57:26 +0000
+Subject: [PATCH] Separar Contratos en Solicitudes, Contratos vigentes y
+ Archivo
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Antes todo vivía en un solo listado "Contratos" con un filtro de estatus.
+Ahora el menú tiene tres secciones según el bloque de estatus:
+- Solicitudes: borrador, en_revision, en_autorizacion, rechazado.
+- Contratos vigentes: autorizado (no usado en la práctica hoy), activo,
+  por_vencer — es decir, todo lo ya autorizado (que el backend pasa
+  automáticamente a "activo" en cuanto se aprueba el último paso).
+- Archivo: vencido, cancelado.
+
+El backend soporta ahora estatusIn (lista separada por comas) en
+GET /contratos, además del estatus= exacto que ya existía. El botón
+"Volver al listado" del expediente regresa a la sección correcta según
+el estatus del contrato. La ruta vieja /contratos redirige a /solicitudes
+por compatibilidad con enlaces existentes.
+---
+ backend/src/routes/contratos.js               | 11 ++-
+ frontend/src/App.jsx                          |  9 ++-
+ frontend/src/components/Layout.jsx            |  4 +-
+ .../src/pages/contratos/DetalleContrato.jsx   |  3 +-
+ .../src/pages/contratos/ListaContratos.jsx    | 80 ++++++++++++++++---
+ .../src/pages/contratos/NuevaSolicitud.jsx    |  2 +-
+ 6 files changed, 92 insertions(+), 17 deletions(-)
+
+diff --git a/backend/src/routes/contratos.js b/backend/src/routes/contratos.js
+index a610937..9025e56 100644
+--- a/backend/src/routes/contratos.js
++++ b/backend/src/routes/contratos.js
+@@ -129,7 +129,7 @@ router.get(
+   '/',
+   requireAuth,
+   asyncHandler(async (req, res) => {
+-    const { estatus, tipoContratoId, texto, proximosAVencer } = req.query;
++    const { estatus, estatusIn, tipoContratoId, texto, proximosAVencer } = req.query;
+     const usuario = req.usuario;
+ 
+     // Los contratos de franquicia viven en su propio módulo (GET /api/franquicias), separado
+@@ -149,6 +149,15 @@ router.get(
+       condiciones.push(`c.estatus = $${i++}`);
+       valores.push(estatus);
+     }
++    // estatusIn: lista separada por comas (p.ej. "activo,por_vencer") para las vistas de
++    // Solicitudes / Contratos vigentes / Archivo, que agrupan varios estatus a la vez.
++    if (estatusIn) {
++      const lista = String(estatusIn).split(',').map((s) => s.trim()).filter(Boolean);
++      if (lista.length > 0) {
++        condiciones.push(`c.estatus = ANY($${i++})`);
++        valores.push(lista);
++      }
++    }
+     if (tipoContratoId) {
+       condiciones.push(`c.tipo_contrato_id = $${i++}`);
+       valores.push(tipoContratoId);
+diff --git a/frontend/src/App.jsx b/frontend/src/App.jsx
+index 7ab01fa..c4b67cc 100644
+--- a/frontend/src/App.jsx
++++ b/frontend/src/App.jsx
+@@ -33,7 +33,14 @@ export default function App() {
+       >
+         <Route index element={<Dashboard />} />
+         <Route path="cambiar-password" element={<CambiarPassword />} />
+-        <Route path="contratos" element={<ListaContratos />} />
++        {/* "Contratos" se dividió en tres vistas por bloque de estatus (ver ListaContratos.jsx):
++            Solicitudes (borrador/en_revision/en_autorizacion/rechazado), Contratos vigentes
++            (autorizado/activo/por_vencer) y Archivo (vencido/cancelado). La ruta vieja
++            /contratos redirige a Solicitudes por si queda algún enlace o marcador viejo. */}
++        <Route path="contratos" element={<Navigate to="/solicitudes" replace />} />
++        <Route path="solicitudes" element={<ListaContratos vista="solicitudes" />} />
++        <Route path="contratos-vigentes" element={<ListaContratos vista="vigentes" />} />
++        <Route path="archivo" element={<ListaContratos vista="archivo" />} />
+         <Route path="contratos/nueva" element={<NuevaSolicitud />} />
+         <Route path="contratos/:id" element={<DetalleContrato />} />
+ 
+diff --git a/frontend/src/components/Layout.jsx b/frontend/src/components/Layout.jsx
+index 7b7db1c..7d4b60d 100644
+--- a/frontend/src/components/Layout.jsx
++++ b/frontend/src/components/Layout.jsx
+@@ -37,7 +37,9 @@ export default function Layout() {
+ 
+         <nav className="sidebar-nav">
+           <NavItem to="/" end>Dashboard</NavItem>
+-          <NavItem to="/contratos">Contratos</NavItem>
++          <NavItem to="/solicitudes">Solicitudes</NavItem>
++          <NavItem to="/contratos-vigentes">Contratos vigentes</NavItem>
++          <NavItem to="/archivo">Archivo</NavItem>
+           <NavItem to="/contratos/nueva">Nueva solicitud</NavItem>
+         </nav>
+ 
+diff --git a/frontend/src/pages/contratos/DetalleContrato.jsx b/frontend/src/pages/contratos/DetalleContrato.jsx
+index 147953a..8fc9991 100644
+--- a/frontend/src/pages/contratos/DetalleContrato.jsx
++++ b/frontend/src/pages/contratos/DetalleContrato.jsx
+@@ -5,6 +5,7 @@ import { useAuth } from '../../auth/AuthContext.jsx';
+ import Spinner from '../../components/Spinner.jsx';
+ import EstatusBadge from '../../components/EstatusBadge.jsx';
+ import ContratoForm, { validarContrato, franquiciaPayload } from '../../components/ContratoForm.jsx';
++import { rutaListaParaEstatus } from './ListaContratos.jsx';
+ import AutorizacionTimeline from '../../components/AutorizacionTimeline.jsx';
+ import DocumentosContrato from '../../components/DocumentosContrato.jsx';
+ import { formatMonto, formatFecha } from '../../utils.js';
+@@ -260,7 +261,7 @@ export default function DetalleContrato() {
+               {enviandoAutorizacion ? 'Enviando…' : 'Enviar a autorización'}
+             </button>
+           )}
+-          <button className="btn btn-secondary" onClick={() => navigate('/contratos')}>Volver al listado</button>
++          <button className="btn btn-secondary" onClick={() => navigate(rutaListaParaEstatus(contrato.estatus))}>Volver al listado</button>
+         </div>
+       </div>
+ 
+diff --git a/frontend/src/pages/contratos/ListaContratos.jsx b/frontend/src/pages/contratos/ListaContratos.jsx
+index 6b065fc..2cf933f 100644
+--- a/frontend/src/pages/contratos/ListaContratos.jsx
++++ b/frontend/src/pages/contratos/ListaContratos.jsx
+@@ -5,12 +5,40 @@ import Spinner from '../../components/Spinner.jsx';
+ import EstatusBadge, { estatusLabel } from '../../components/EstatusBadge.jsx';
+ import { formatMonto, formatFecha } from '../../utils.js';
+ 
+-const ESTATUS_OPCIONES = [
+-  'borrador', 'en_revision', 'en_autorizacion', 'rechazado',
+-  'autorizado', 'activo', 'por_vencer', 'vencido', 'cancelado',
+-];
++// Cada "vista" agrupa los contratos por bloque de estatus, según la organización acordada:
++// - Solicitudes: todo lo que aún no se autoriza, o que se rechazó.
++// - Contratos vigentes: lo ya autorizado y en operación (activo/por_vencer). Nota: el estatus
++//   'autorizado' del enum no llega a usarse en la práctica — el backend salta directo de
++//   'en_autorizacion' a 'activo' en cuanto se aprueba el último paso — pero se incluye aquí
++//   por si algún día se usa como estado intermedio.
++// - Archivo: lo que ya terminó su ciclo de vida (vencido o cancelado).
++const VISTAS = {
++  solicitudes: {
++    titulo: 'Solicitudes',
++    subtitulo: 'Borradores, en revisión, en autorización o rechazados.',
++    estatusPermitidos: ['borrador', 'en_revision', 'en_autorizacion', 'rechazado'],
++    mostrarNuevaSolicitud: true,
++    vacioTexto: 'No se encontraron solicitudes con estos filtros.',
++  },
++  vigentes: {
++    titulo: 'Contratos vigentes',
++    subtitulo: 'Contratos ya autorizados y en operación.',
++    estatusPermitidos: ['autorizado', 'activo', 'por_vencer'],
++    mostrarNuevaSolicitud: false,
++    vacioTexto: 'No hay contratos vigentes con estos filtros.',
++  },
++  archivo: {
++    titulo: 'Archivo',
++    subtitulo: 'Contratos vencidos o cancelados.',
++    estatusPermitidos: ['vencido', 'cancelado'],
++    mostrarNuevaSolicitud: false,
++    vacioTexto: 'No hay contratos archivados con estos filtros.',
++  },
++};
++
++export default function ListaContratos({ vista = 'solicitudes' }) {
++  const config = VISTAS[vista] || VISTAS.solicitudes;
+ 
+-export default function ListaContratos() {
+   const [contratos, setContratos] = useState([]);
+   const [tipos, setTipos] = useState([]);
+   const [cargando, setCargando] = useState(true);
+@@ -21,6 +49,14 @@ export default function ListaContratos() {
+   const [q, setQ] = useState('');
+   const [qInput, setQInput] = useState('');
+ 
++  // Si se navega entre vistas (Solicitudes -> Contratos vigentes, etc.) el filtro de estatus
++  // del sub-dropdown no debe arrastrarse de una vista a otra.
++  useEffect(() => {
++    setEstatus('');
++    setQ('');
++    setQInput('');
++  }, [vista]);
++
+   useEffect(() => {
+     api.get('/tipos-contrato', { activo: 'false' })
+       // Los de franquicia no aparecen aquí: este listado los excluye (viven en su propio
+@@ -37,7 +73,16 @@ export default function ListaContratos() {
+       try {
+         // Se envían ambos nombres de parámetro (tipo/tipoContratoId, q/texto) para ser
+         // compatibles tanto con el contrato de API original como con el backend real.
+-        const data = await api.get('/contratos', { estatus, tipo, tipoContratoId: tipo, q, texto: q });
++        // estatusIn fija el bloque de estatus de la vista; si además hay un sub-filtro de
++        // estatus específico (dentro de ese mismo bloque), se manda como estatus normal.
++        const data = await api.get('/contratos', {
++          estatus,
++          estatusIn: estatus ? '' : config.estatusPermitidos.join(','),
++          tipo,
++          tipoContratoId: tipo,
++          q,
++          texto: q,
++        });
+         if (activo) setContratos(unwrap(data, 'contratos') || []);
+       } catch (err) {
+         if (activo) setError(err.message || 'No se pudieron cargar los contratos.');
+@@ -47,7 +92,7 @@ export default function ListaContratos() {
+     }
+     cargar();
+     return () => { activo = false; };
+-  }, [estatus, tipo, q]);
++  }, [vista, estatus, tipo, q]);
+ 
+   function handleSearchSubmit(e) {
+     e.preventDefault();
+@@ -58,10 +103,12 @@ export default function ListaContratos() {
+     <div>
+       <div className="page-header">
+         <div>
+-          <h1>Contratos</h1>
+-          <p className="page-header-sub">Listado y búsqueda de expedientes contractuales.</p>
++          <h1>{config.titulo}</h1>
++          <p className="page-header-sub">{config.subtitulo}</p>
+         </div>
+-        <Link to="/contratos/nueva" className="btn btn-primary">+ Nueva solicitud</Link>
++        {config.mostrarNuevaSolicitud && (
++          <Link to="/contratos/nueva" className="btn btn-primary">+ Nueva solicitud</Link>
++        )}
+       </div>
+ 
+       <form className="filters-bar" onSubmit={handleSearchSubmit}>
+@@ -74,7 +121,7 @@ export default function ListaContratos() {
+         />
+         <select value={estatus} onChange={(e) => setEstatus(e.target.value)}>
+           <option value="">Todos los estatus</option>
+-          {ESTATUS_OPCIONES.map((op) => (
++          {config.estatusPermitidos.map((op) => (
+             <option key={op} value={op}>{estatusLabel(op)}</option>
+           ))}
+         </select>
+@@ -118,7 +165,7 @@ export default function ListaContratos() {
+             <tbody>
+               {contratos.length === 0 ? (
+                 <tr>
+-                  <td colSpan={8} className="table-empty">No se encontraron contratos con estos filtros.</td>
++                  <td colSpan={8} className="table-empty">{config.vacioTexto}</td>
+                 </tr>
+               ) : (
+                 contratos.map((c) => (
+@@ -141,3 +188,12 @@ export default function ListaContratos() {
+     </div>
+   );
+ }
++
++export function rutaListaParaEstatus(estatus) {
++  for (const [vista, config] of Object.entries(VISTAS)) {
++    if (config.estatusPermitidos.includes(estatus)) {
++      return `/${vista === 'solicitudes' ? 'solicitudes' : vista === 'vigentes' ? 'contratos-vigentes' : 'archivo'}`;
++    }
++  }
++  return '/solicitudes';
++}
+diff --git a/frontend/src/pages/contratos/NuevaSolicitud.jsx b/frontend/src/pages/contratos/NuevaSolicitud.jsx
+index 2d9222c..ee85c79 100644
+--- a/frontend/src/pages/contratos/NuevaSolicitud.jsx
++++ b/frontend/src/pages/contratos/NuevaSolicitud.jsx
+@@ -36,7 +36,7 @@ export default function NuevaSolicitud() {
+       };
+       const contrato = await api.post('/contratos', payload);
+       const id = contrato?.id || contrato?.contrato?.id;
+-      navigate(id ? `/contratos/${id}` : '/contratos');
++      navigate(id ? `/contratos/${id}` : '/solicitudes');
+     } catch (err) {
+       setErrorGeneral(err.message || 'No se pudo crear la solicitud.');
+     } finally {
+-- 
+2.43.0
+

@@ -49,7 +49,7 @@ export default function EnviarAFirmarModal({ contratoId, documento, onClose, onE
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Enviar a firmar por Documenso</h3>
+        <h3>Enviar a firmar por DocuSeal</h3>
         <p className="muted" style={{ fontSize: 13, marginTop: -8 }}>
           Documento: <b>{documento.nombreArchivo}</b>
         </p>

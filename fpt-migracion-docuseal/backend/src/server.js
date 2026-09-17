@@ -18,7 +18,7 @@ const dashboardRoutes = require('./routes/dashboard');
 const jobsRoutes = require('./routes/jobs');
 const clubesRoutes = require('./routes/clubes');
 const franquiciasRoutes = require('./routes/franquicias');
-const documensoWebhookRoutes = require('./routes/documensoWebhook');
+const docusealWebhookRoutes = require('./routes/docusealWebhook');
 const { iniciarProgramador } = require('./jobs/scheduler');
 
 const app = express();
@@ -29,7 +29,17 @@ app.use(
     origin: corsOrigin === '*' ? true : corsOrigin.split(',').map((o) => o.trim()),
   })
 );
-app.use(express.json({ limit: '5mb' }));
+// `verify` guarda el cuerpo crudo (bytes exactos) en req.rawBody antes de parsearlo a JSON —
+// lo necesita routes/docusealWebhook.js para verificar la firma HMAC-SHA256 de DocuSeal
+// (X-Docuseal-Signature), que se calcula sobre el cuerpo crudo, no sobre el JSON re-serializado.
+app.use(
+  express.json({
+    limit: '5mb',
+    verify: (req, res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
 app.use(express.urlencoded({ extended: true }));
 
 // Archivos subidos (documentos de contratos), servidos como estáticos bajo /uploads.
@@ -50,9 +60,9 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/jobs', jobsRoutes);
 app.use('/api/clubes', clubesRoutes);
 app.use('/api/franquicias', franquiciasRoutes);
-// Público (sin requireAuth): lo llama la instancia de Documenso, no un usuario de la app. Ver
-// src/routes/documensoWebhook.js para el modelo de seguridad (secreto compartido opcional).
-app.use('/api/webhooks/documenso', documensoWebhookRoutes);
+// Público (sin requireAuth): lo llama la instancia de DocuSeal, no un usuario de la app. Ver
+// src/routes/docusealWebhook.js para el modelo de seguridad (firma HMAC opcional).
+app.use('/api/webhooks/docuseal', docusealWebhookRoutes);
 
 // 404
 app.use((req, res) => {

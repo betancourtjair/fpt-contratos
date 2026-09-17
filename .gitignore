@@ -7,3 +7,9 @@ frontend/dist/
 backend/.env
 frontend/.env
 *.log
+
+# Zips y reportes usados para entregar avances puntuales; no son parte de la
+# app ni del build (dist/index.html, dist/assets, etc. de una entrega vieja
+# de gh-pages sí siguen versionados).
+dist/doc/
+dist/*.zip

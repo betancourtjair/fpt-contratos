@@ -1,13 +1,36 @@
-import { useState } from 'react';
-import { api } from '../api.js';
+import { useEffect, useState } from 'react';
+import { api, unwrap } from '../api.js';
 
 const FIRMANTE_VACIO = { nombres: '', apellidoPaterno: '', apellidoMaterno: '', email: '' };
 
 export default function EnviarAFirmarModal({ contratoId, documento, onClose, onEnviado }) {
+  const [tipos, setTipos] = useState([]);
+  const [entorno, setEntorno] = useState(null);
+  const [cargandoTipos, setCargandoTipos] = useState(true);
+  const [tipoDocumento, setTipoDocumento] = useState('');
   const [ordenada, setOrdenada] = useState(false);
   const [firmantes, setFirmantes] = useState([{ ...FIRMANTE_VACIO }]);
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelado = false;
+    (async () => {
+      try {
+        const data = await api.get('/contratos/doc2sign/tipos-documento');
+        if (cancelado) return;
+        const lista = unwrap(data, 'tipos') || [];
+        setTipos(lista);
+        setEntorno(data?.entorno);
+        if (lista.length > 0) setTipoDocumento(lista[0].id || lista[0].Id || lista[0].ID || '');
+      } catch (err) {
+        if (!cancelado) setError(err.message || 'No se pudo cargar el catálogo de tipos de documento de doc2sign.');
+      } finally {
+        if (!cancelado) setCargandoTipos(false);
+      }
+    })();
+    return () => { cancelado = true; };
+  }, []);
 
   function actualizarFirmante(idx, campo, valor) {
     setFirmantes((prev) => prev.map((f, i) => (i === idx ? { ...f, [campo]: valor } : f)));
@@ -25,6 +48,10 @@ export default function EnviarAFirmarModal({ contratoId, documento, onClose, onE
     e.preventDefault();
     setError('');
 
+    if (!tipoDocumento) {
+      setError('Elige el tipo de documento (catálogo de doc2sign).');
+      return;
+    }
     const incompletos = firmantes.some((f) => !f.nombres.trim() || !f.apellidoPaterno.trim() || !f.email.trim());
     if (incompletos) {
       setError('Cada firmante necesita al menos nombre(s), apellido paterno y correo.');
@@ -34,6 +61,7 @@ export default function EnviarAFirmarModal({ contratoId, documento, onClose, onE
     setEnviando(true);
     try {
       await api.post(`/contratos/${contratoId}/documentos/${documento.id}/enviar-a-firmar`, {
+        tipoDocumento,
         ordenada,
         firmantes: firmantes.map((f, idx) => ({ ...f, orden: idx + 1 })),
       });
@@ -49,17 +77,40 @@ export default function EnviarAFirmarModal({ contratoId, documento, onClose, onE
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Enviar a firmar por Documenso</h3>
+        <h3>Enviar a firmar por doc2sign</h3>
         <p className="muted" style={{ fontSize: 13, marginTop: -8 }}>
           Documento: <b>{documento.nombreArchivo}</b>
-        </p>
-        <p className="muted" style={{ fontSize: 12 }}>
-          Firma electrónica simple (no cuenta con certificación NOM-151).
+          {entorno === 'test' && (
+            <span className="tag-pill" style={{ marginLeft: 8 }}>Ambiente de pruebas</span>
+          )}
         </p>
 
         {error && <div className="alert alert-error">{error}</div>}
 
         <form onSubmit={handleSubmit}>
+          <div className="field">
+            <label htmlFor="firma-tipo-documento">Tipo de documento (doc2sign) *</label>
+            {cargandoTipos ? (
+              <p className="muted" style={{ fontSize: 13 }}>Cargando catálogo…</p>
+            ) : tipos.length === 0 ? (
+              <p className="error-text" style={{ fontSize: 13 }}>
+                No se encontró ningún tipo de documento configurado en la cuenta de doc2sign.
+              </p>
+            ) : (
+              <select
+                id="firma-tipo-documento"
+                value={tipoDocumento}
+                onChange={(e) => setTipoDocumento(e.target.value)}
+              >
+                {tipos.map((t) => {
+                  const id = t.id || t.Id || t.ID;
+                  const nombre = t.nombre || t.Nombre || id;
+                  return <option key={id} value={id}>{nombre}</option>;
+                })}
+              </select>
+            )}
+          </div>
+
           <div className="field checkbox-row">
             <input
               id="firma-ordenada"
@@ -128,7 +179,7 @@ export default function EnviarAFirmarModal({ contratoId, documento, onClose, onE
             <button type="button" className="btn btn-secondary" onClick={onClose} disabled={enviando}>
               Cancelar
             </button>
-            <button type="submit" className="btn btn-primary" disabled={enviando}>
+            <button type="submit" className="btn btn-primary" disabled={enviando || cargandoTipos || tipos.length === 0}>
               {enviando ? 'Enviando…' : 'Enviar a firmar'}
             </button>
           </div>

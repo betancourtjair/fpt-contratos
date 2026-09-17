@@ -18,13 +18,13 @@ const cron = require('node-cron');
 const { revisarVencimientos } = require('../utils/vencimientos');
 const { revisarFranquicias } = require('../utils/franquicias');
 const { revisarPendientes: revisarFirmasPendientes } = require('../utils/firmaElectronica');
-const documenso = require('../documensoClient');
+const docuseal = require('../docusealClient');
 
 const ZONA_HORARIA = 'America/Mexico_City';
 const EXPRESION_DIARIA = '0 7 * * *'; // 07:00 todos los días
-// Firma electrónica: revisión más seguida que la diaria porque el webhook de Documenso (ver
-// routes/documensoWebhook.js) es el aviso "en vivo", pero esto es el respaldo por si algún
-// aviso no llega o el webhook todavía no se configuró dentro de Documenso.
+// Firma electrónica: revisión más seguida que la diaria porque el webhook de DocuSeal (ver
+// routes/docusealWebhook.js) es el aviso "en vivo", pero esto es el respaldo por si algún aviso
+// no llega o el webhook todavía no se configuró dentro de DocuSeal.
 const EXPRESION_FIRMAS = '0 */2 * * *'; // cada 2 horas
 const RETRASO_INICIAL_MS = 15 * 1000; // 15s tras arrancar, para no competir con el boot del server
 
@@ -66,7 +66,7 @@ async function ejecutarRevisionSegura(origen) {
 
 let revisandoFirmas = false;
 async function ejecutarRevisionFirmasSegura(origen) {
-  if (!documenso.configurado()) return; // integración no configurada: no hay nada que revisar
+  if (!docuseal.configurado()) return; // integración no configurada: no hay nada que revisar
   if (revisandoFirmas) {
     console.log(`[scheduler] Revisión de firmas pendientes ya en curso, se omite el disparo desde "${origen}".`);
     return;
@@ -103,7 +103,7 @@ function iniciarProgramador() {
 
   console.log(
     `[scheduler] Programador iniciado: revisión de vencimientos y de franquicias al arrancar y todos los días a las 07:00, ` +
-    `y revisión de firmas pendientes (Documenso) al arrancar y cada 2 horas (${ZONA_HORARIA}).`
+    `y revisión de firmas pendientes (DocuSeal) al arrancar y cada 2 horas (${ZONA_HORARIA}).`
   );
 }
 
