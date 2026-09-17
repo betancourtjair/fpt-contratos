@@ -15,17 +15,17 @@ function categoriaLabel(valor) {
   return CATEGORIAS.find((c) => c.value === valor)?.label || valor || 'Sin categoría';
 }
 
-// Estado de firma electrónica (doc2sign) de un documento: solo aplica al documento que se
+// Estado de firma electrónica (DocuSeal) de un documento: solo aplica al documento que se
 // mandó a firmar (mientras sigue siendo la versión vigente); una vez firmado, la versión
 // vigente pasa a ser el PDF firmado que se agregó automáticamente al expediente (ver tag
-// "Firmado en doc2sign" más abajo).
+// "Firmado en DocuSeal" más abajo).
 function FirmaEstado({ doc, verificando, onVerificar }) {
-  if (!doc.doc2signDocumentoId) return null;
-  if (doc.doc2signFirmadoEn) return <span className="tag-pill">Firmado</span>;
-  if (doc.doc2signRechazadoEn) return <span className="tag-pill">Firma rechazada</span>;
+  if (!doc.docusealSubmissionId) return null;
+  if (doc.docusealFirmadoEn) return <span className="tag-pill">Firmado</span>;
+  if (doc.docusealRechazadoEn) return <span className="tag-pill">Firma rechazada</span>;
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-      <span className="tag-pill" title={doc.doc2signEstatus || ''}>En firma</span>
+      <span className="tag-pill" title={doc.docusealEstatus || ''}>En firma</span>
       <button type="button" className="icon-btn" onClick={() => onVerificar(doc)} disabled={verificando}>
         {verificando ? 'Verificando…' : 'Verificar estatus'}
       </button>
@@ -46,7 +46,7 @@ function FilaVersion({ doc }) {
     <tr className="fila-version-historial">
       <td style={{ paddingLeft: 28 }}>
         v{doc.version} — {doc.nombreArchivo}
-        {doc.origen === 'doc2sign' && <span className="tag-pill" style={{ marginLeft: 6 }}>Firmado en doc2sign</span>}
+        {doc.origen === 'docuseal' && <span className="tag-pill" style={{ marginLeft: 6 }}>Firmado en DocuSeal</span>}
       </td>
       <td><span className="tag-pill">{categoriaLabel(doc.categoria)}</span></td>
       <td>{doc.subidoPorNombre || '—'}</td>
@@ -162,14 +162,14 @@ export default function DocumentosContrato({ contratoId, documentos = [], onSubi
                       <td>
                         {doc.nombreArchivo}
                         {doc.origen === 'plantilla' && <span className="tag-pill" style={{ marginLeft: 6 }}>Generado</span>}
-                        {doc.origen === 'doc2sign' && <span className="tag-pill" style={{ marginLeft: 6 }}>Firmado en doc2sign</span>}
+                        {doc.origen === 'docuseal' && <span className="tag-pill" style={{ marginLeft: 6 }}>Firmado en DocuSeal</span>}
                       </td>
                       <td><span className="tag-pill">{categoriaLabel(doc.categoria)}</span></td>
                       <td>{doc.subidoPorNombre || '—'}</td>
                       <td>{formatFechaHora(doc.createdAt)}</td>
                       <td style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                         {url && <a href={url} target="_blank" rel="noreferrer">Ver</a>}
-                        {doc.doc2signDocumentoId ? (
+                        {doc.docusealSubmissionId ? (
                           <FirmaEstado
                             doc={doc}
                             verificando={!!verificandoFirma[doc.id]}

@@ -68,7 +68,7 @@ function driverLocal() {
       return path.join(UPLOADS_DIR, clave);
     },
 
-    /** Lee el archivo completo en memoria (usado para mandarlo a firma vía doc2sign). */
+    /** Lee el archivo completo en memoria (usado para mandarlo a firma vía DocuSeal). */
     async leerBuffer(clave) {
       return fs.promises.readFile(path.join(UPLOADS_DIR, clave));
     },

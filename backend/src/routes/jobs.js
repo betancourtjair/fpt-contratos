@@ -24,7 +24,7 @@ router.post(
 );
 
 // POST /api/jobs/revisar-firmas-pendientes
-// Igual que arriba pero para documentos mandados a firmar vía doc2sign (ver
+// Igual que arriba pero para documentos mandados a firmar vía DocuSeal (ver
 // src/jobs/scheduler.js: corre sola al arrancar y cada 2 horas). Útil para forzar una revisión
 // inmediata en vez de esperar al webhook o al siguiente ciclo del cron.
 router.post(

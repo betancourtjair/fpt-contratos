@@ -23,7 +23,7 @@ const { condicionVisibilidad } = require('../utils/visibilidad');
 const { datosParaPlantilla, renderizarPlantilla } = require('../utils/plantillas');
 const { estatusLabel } = require('../utils/estatusLabels');
 const { sincronizarEstatusEnDocumentos } = require('../utils/documentosMetadatos');
-const doc2sign = require('../doc2signClient');
+const docuseal = require('../docusealClient');
 const firmaElectronica = require('../utils/firmaElectronica');
 
 const router = express.Router();
@@ -979,29 +979,15 @@ router.post(
 );
 
 // ---------------------------------------------------------------------------
-// Firma electrónica (doc2sign / NOM-151)
+// Firma electrónica (DocuSeal — self-hosted; ver backend/src/docusealClient.js)
 // ---------------------------------------------------------------------------
 
-// GET /api/contratos/doc2sign/tipos-documento - catálogo real de "tipos de documento"
-// configurados en la cuenta de doc2sign de FPT (Contrato, Franchise Agreement, NDA, etc.),
-// para poblar el <select> del formulario de "Enviar a firmar" sin hardcodear GUIDs aquí.
-router.get(
-  '/doc2sign/tipos-documento',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    if (!doc2sign.configurado()) {
-      throw badRequest('La integración con doc2sign no está configurada (faltan DOC2SIGN_CLIENT_ID / DOC2SIGN_CLIENT_SECRET).');
-    }
-    const tipos = await doc2sign.listarTiposDocumento();
-    res.json({ tipos, entorno: doc2sign.entorno() });
-  })
-);
-
 // POST /api/contratos/:id/documentos/:documentoId/enviar-a-firmar
-// Manda la versión VIGENTE del documento indicado a firma electrónica vía doc2sign, usando los
-// créditos de la empresa. Firmantes 100% capturados a mano en cada envío (no requieren cuenta
-// previa en doc2sign): así sirve tanto para el representante de FPT como para la contraparte
-// externa, en cualquier combinación.
+// Manda la versión VIGENTE del documento indicado a firma electrónica vía DocuSeal (instancia
+// propia, self-hosted). Firmantes 100% capturados a mano en cada envío (no requieren cuenta
+// previa en DocuSeal): así sirve tanto para el representante de FPT como para la contraparte
+// externa, en cualquier combinación. A diferencia de doc2sign, no hay catálogo de "tipos de
+// documento" que elegir — cualquier PDF se manda directo.
 router.post(
   '/:id/documentos/:documentoId/enviar-a-firmar',
   requireAuth,
@@ -1013,8 +999,8 @@ router.post(
     if (!esRolPrivilegiado(req.usuario.rol) && !esDueño) {
       throw forbidden('No puedes enviar a firma un documento de un contrato que no solicitaste.');
     }
-    if (!doc2sign.configurado()) {
-      throw badRequest('La integración con doc2sign no está configurada (faltan DOC2SIGN_CLIENT_ID / DOC2SIGN_CLIENT_SECRET).');
+    if (!docuseal.configurado()) {
+      throw badRequest('La integración con DocuSeal no está configurada (faltan DOCUSEAL_URL / DOCUSEAL_API_TOKEN).');
     }
 
     const { rows: documentoRows } = await query(
@@ -1023,14 +1009,11 @@ router.post(
     );
     const documento = documentoRows[0];
     if (!documento) throw notFound('Documento no encontrado (o ya no es la versión vigente).');
-    if (documento.doc2sign_documento_id && !documento.doc2sign_rechazado_en) {
+    if (documento.docuseal_submission_id && !documento.docuseal_rechazado_en) {
       throw conflict('Este documento ya se mandó a firmar y sigue en proceso (o ya quedó firmado).');
     }
 
     const body = req.body || {};
-    const tipoDocumento = body.tipoDocumento;
-    if (!tipoDocumento) throw badRequest('Falta tipoDocumento (elige el tipo de documento configurado en doc2sign).');
-
     const firmantesEntrada = Array.isArray(body.firmantes) ? body.firmantes : [];
     if (firmantesEntrada.length === 0) throw badRequest('Se requiere al menos un firmante.');
     const firmantes = firmantesEntrada.map((f, idx) => {
@@ -1050,16 +1033,15 @@ router.post(
     const bufferDocumento = await storageContratos.obtenerBuffer(documento.ruta_archivo);
     const base64PDF = bufferDocumento.toString('base64');
 
-    const doc2signDocumentoId = await doc2sign.cargarDocumento({
+    const { submissionId } = await docuseal.crearSubmission({
       base64PDF,
       nombreDocumento: `${contrato.folio} - ${documento.nombre_archivo}`.slice(0, 250),
-      tipoDocumento,
       ordenada,
       firmantes,
     });
 
     await firmaElectronica.marcarEnviado(documento.id, {
-      doc2signDocumentoId,
+      submissionId,
       firmantes,
       usuarioId: req.usuario.id,
     });
@@ -1068,22 +1050,21 @@ router.post(
       contratoId: contrato.id,
       usuarioId: req.usuario.id,
       accion: 'documento_enviado_a_firmar',
-      detalle: `"${documento.nombre_archivo}" enviado a firma vía doc2sign (${doc2sign.entorno()}) con ${firmantes.length} firmante(s): ${firmantes
+      detalle: `"${documento.nombre_archivo}" enviado a firma vía DocuSeal con ${firmantes.length} firmante(s): ${firmantes
         .map((f) => f.email)
         .join(', ')}.`,
     });
 
     res.json({
       documentoId: documento.id,
-      doc2signDocumentoId,
-      entorno: doc2sign.entorno(),
+      submissionId,
       firmantes,
     });
   })
 );
 
 // GET /api/contratos/:id/documentos/:documentoId/estatus-firma - revisa AHORA MISMO el estatus
-// en doc2sign (botón "Verificar estatus" en el frontend); el job periódico hace lo mismo solo.
+// en DocuSeal (botón "Verificar estatus" en el frontend); el job periódico hace lo mismo solo.
 router.get(
   '/:id/documentos/:documentoId/estatus-firma',
   requireAuth,
@@ -1097,7 +1078,7 @@ router.get(
     );
     const documento = rows[0];
     if (!documento) throw notFound('Documento no encontrado.');
-    if (!documento.doc2sign_documento_id) {
+    if (!documento.docuseal_submission_id) {
       throw badRequest('Este documento no se ha mandado a firmar.');
     }
 
@@ -1106,9 +1087,9 @@ router.get(
     const { rows: actualizadoRows } = await query('SELECT * FROM contrato_documentos WHERE id = $1', [documento.id]);
     const actualizado = actualizadoRows[0];
     res.json({
-      doc2signEstatus: actualizado.doc2sign_estatus,
-      firmado: Boolean(actualizado.doc2sign_firmado_en),
-      rechazado: Boolean(actualizado.doc2sign_rechazado_en),
+      docusealEstatus: actualizado.docuseal_estatus,
+      firmado: Boolean(actualizado.docuseal_firmado_en),
+      rechazado: Boolean(actualizado.docuseal_rechazado_en),
     });
   })
 );

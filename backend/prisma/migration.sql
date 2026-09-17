@@ -251,3 +251,36 @@ ALTER TABLE contrato_documentos ADD COLUMN doc2sign_firmado_en TIMESTAMPTZ;
 ALTER TABLE contrato_documentos ADD COLUMN doc2sign_rechazado_en TIMESTAMPTZ;
 CREATE INDEX idx_contrato_documentos_doc2sign_id ON contrato_documentos(doc2sign_documento_id)
   WHERE doc2sign_documento_id IS NOT NULL;
+
+-- ---------------------------------------------------------------------------
+-- Se reemplaza por completo la integración de firma electrónica: doc2sign (PSC World, de
+-- paga, NOM-151) se sustituye por DocuSeal (open-source, self-hosted, sin costo de licencia
+-- — ver backend/src/docusealClient.js). Importante: DocuSeal es firma electrónica SIMPLE, NO
+-- tiene certificación NOM-151 como sí tenía doc2sign; es una decisión consciente de costo vs.
+-- certeza legal, confirmada con el usuario. Se quitan las columnas doc2sign_* (ya sin uso, el
+-- código que las llenaba ya no existe) y se agregan sus equivalentes docuseal_*, mismo patrón
+-- que antes: docuseal_firmado_en / docuseal_rechazado_en son la marca de "ya no sigas
+-- revisando este documento" para el job periódico (NULL = todavía en proceso).
+-- docuseal_submission_id es TEXT (no UUID): los ids de "submission" de DocuSeal son numéricos
+-- (ej. "5"), no GUIDs.
+-- ---------------------------------------------------------------------------
+DROP INDEX IF EXISTS idx_contrato_documentos_doc2sign_id;
+ALTER TABLE contrato_documentos DROP COLUMN IF EXISTS doc2sign_documento_id;
+ALTER TABLE contrato_documentos DROP COLUMN IF EXISTS doc2sign_estatus;
+ALTER TABLE contrato_documentos DROP COLUMN IF EXISTS doc2sign_firmantes;
+ALTER TABLE contrato_documentos DROP COLUMN IF EXISTS doc2sign_enviado_por_id;
+ALTER TABLE contrato_documentos DROP COLUMN IF EXISTS doc2sign_enviado_at;
+ALTER TABLE contrato_documentos DROP COLUMN IF EXISTS doc2sign_actualizado_at;
+ALTER TABLE contrato_documentos DROP COLUMN IF EXISTS doc2sign_firmado_en;
+ALTER TABLE contrato_documentos DROP COLUMN IF EXISTS doc2sign_rechazado_en;
+
+ALTER TABLE contrato_documentos ADD COLUMN docuseal_submission_id TEXT;
+ALTER TABLE contrato_documentos ADD COLUMN docuseal_estatus TEXT;
+ALTER TABLE contrato_documentos ADD COLUMN docuseal_firmantes JSONB;
+ALTER TABLE contrato_documentos ADD COLUMN docuseal_enviado_por_id UUID REFERENCES usuarios(id);
+ALTER TABLE contrato_documentos ADD COLUMN docuseal_enviado_at TIMESTAMPTZ;
+ALTER TABLE contrato_documentos ADD COLUMN docuseal_actualizado_at TIMESTAMPTZ;
+ALTER TABLE contrato_documentos ADD COLUMN docuseal_firmado_en TIMESTAMPTZ;
+ALTER TABLE contrato_documentos ADD COLUMN docuseal_rechazado_en TIMESTAMPTZ;
+CREATE INDEX idx_contrato_documentos_docuseal_id ON contrato_documentos(docuseal_submission_id)
+  WHERE docuseal_submission_id IS NOT NULL;

@@ -267,7 +267,7 @@ async function actualizarCampos(clave, metadatos) {
   }
 }
 
-/** Descarga el contenido del archivo (usado para mandarlo a firma vía doc2sign). */
+/** Descarga el contenido del archivo (usado para mandarlo a firma vía DocuSeal). */
 async function obtenerBuffer(clave) {
   const token = await obtenerToken();
   const driveId = await obtenerDriveId(token);
