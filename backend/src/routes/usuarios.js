@@ -24,6 +24,21 @@ router.get(
   })
 );
 
+// GET /api/usuarios/directorio — lista liviana (id, nombre, email) de usuarios activos.
+// A diferencia de GET / (arriba, solo admin+), cualquier usuario autenticado puede consultarla:
+// no expone rol, area ni ningun otro dato del usuario. Pensada para autocompletar firmantes
+// internos al enviar un documento a firma (ver EnviarAFirmarModal.jsx en el frontend).
+router.get(
+    '/directorio',
+    requireAuth,
+    asyncHandler(async (req, res) => {
+          const { rows } = await query(
+                  'SELECT id, nombre, email FROM usuarios WHERE activo = true ORDER BY nombre ASC'
+                );
+          res.json({ usuarios: rows });
+    })
+  );
+
 // PATCH /api/usuarios/:id (rol, activo) - admin+
 router.patch(
   '/:id',
