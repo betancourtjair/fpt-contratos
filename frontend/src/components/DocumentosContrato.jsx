@@ -15,6 +15,45 @@ function categoriaLabel(valor) {
   return CATEGORIAS.find((c) => c.value === valor)?.label || valor || 'Sin categoría';
 }
 
+   // Lista de firmantes con enlace de firma listo para copiar y compartir por WhatsApp/correo:
+// abre FirmarEspera.jsx, que "precalienta" la instancia de Documenso (self-hosted en Render,
+// se duerme tras inactividad) antes de mandar al firmante ahí, en vez de que dependa solo del
+// correo automático de Documenso.
+function FirmantesConEnlace({ firmantes }) {
+  const [copiadoIdx, setCopiadoIdx] = useState(null);
+
+  async function copiar(idx, url, nombre) {
+    const base = `${window.location.origin}${window.location.pathname}`;
+    const enlace = `${base}#/firmar-espera?url=${encodeURIComponent(url)}&nombre=${encodeURIComponent(nombre || '')}`;
+    try {
+      await navigator.clipboard.writeText(enlace);
+      setCopiadoIdx(idx);
+      setTimeout(() => setCopiadoIdx(null), 2000);
+    } catch {
+      window.prompt('Copia este enlace:', enlace);
+    }
+  }
+
+  const conEnlace = Array.isArray(firmantes) ? firmantes.filter((f) => f.signingUrl) : [];
+  if (conEnlace.length === 0) return null;
+
+  return (
+    <span style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 4 }}>
+      {conEnlace.map((f, idx) => (
+      <button
+        key={idx}
+        type="button"
+        className="icon-btn"
+        style={{ fontSize: 11 }}
+        onClick={() => copiar(idx, f.signingUrl, f.nombreCompleto)}
+        >
+        {copiadoIdx === idx ? 'Enlace copiado' : `Copiar enlace pre-calentado: ${f.nombreCompleto}`}
+      </button>
+      ))}
+    </span>
+    );
+}
+
 // Estado de firma electrónica (Documenso) de un documento: solo aplica al documento que se
 // mandó a firmar (mientras sigue siendo la versión vigente); una vez firmado, la versión
 // vigente pasa a ser el PDF firmado que se agregó automáticamente al expediente (ver tag
@@ -24,11 +63,14 @@ function FirmaEstado({ doc, verificando, onVerificar }) {
   if (doc.documensoFirmadoEn) return <span className="tag-pill">Firmado</span>;
   if (doc.documensoRechazadoEn) return <span className="tag-pill">Firma rechazada</span>;
   return (
+    <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 4 }}>
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
       <span className="tag-pill" title={doc.documensoEstatus || ''}>En firma</span>
       <button type="button" className="icon-btn" onClick={() => onVerificar(doc)} disabled={verificando}>
         {verificando ? 'Verificando…' : 'Verificar estatus'}
       </button>
+    </span>
+      <FirmantesConEnlace firmantes={doc.documensoFirmantes} />
     </span>
   );
 }
