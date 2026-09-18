@@ -82,7 +82,7 @@ async function llamar(metodo, path, { body, form } = {}) {
 }
 
 function nombreCompleto(f) {
-    return [f.nombres, f.apellidoPaterno, f.apellidoMaterno].filter(Boolean).join(' ').trim();
+    return (f.nombreCompleto || '').trim();
 }
 
 /**
@@ -128,9 +128,9 @@ function areaPorDefecto(idx) {
  *   base64PDF: string,
  *   nombreDocumento: string,
  *   ordenada: boolean,
- *   firmantes: Array<{nombres: string, apellidoPaterno: string, apellidoMaterno?: string, email: string, orden: number}>,
- * }} datos
- * @returns {Promise<{submissionId: string, submitters: Array<{email: string, slug: string, embedSrc: string}>}>}
+    *   firmantes: Array<{nombreCompleto: string, email: string, orden: number}>,
+    * }} datos
+    * @returns {Promise<{submissionId: string, submitters: Array<{email: string, slug: string, embedSrc: string}>}>}
  */
 async function crearSubmission(datos) {
     if (!Array.isArray(datos.firmantes) || datos.firmantes.length === 0) {
