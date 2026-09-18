@@ -249,4 +249,3 @@ export default function NuevaSolicitud() {
           </div>
         );
 }
-</div>
