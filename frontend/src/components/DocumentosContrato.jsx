@@ -56,7 +56,13 @@ function FilaVersion({ doc }) {
   );
 }
 
-export default function DocumentosContrato({ contratoId, documentos = [], onSubido }) {
+export default function DocumentosContrato({
+    contratoId,
+    documentos = [],
+    onSubido,
+    contraparteNombre,
+    contraparteEmail,
+}) {
   const [archivo, setArchivo] = useState(null);
   const [categoria, setCategoria] = useState(CATEGORIAS[0].value);
   const [grupoDestino, setGrupoDestino] = useState('');
@@ -246,6 +252,8 @@ export default function DocumentosContrato({ contratoId, documentos = [], onSubi
         <EnviarAFirmarModal
           contratoId={contratoId}
           documento={docParaFirmar}
+          contraparteNombre={contraparteNombre}
+          contraparteEmail={contraparteEmail}
           onClose={() => setDocParaFirmar(null)}
           onEnviado={onSubido}
         />
