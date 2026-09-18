@@ -1,17 +1,50 @@
-import { useState } from 'react';
-import { api } from '../api.js';
+import { useEffect, useState } from 'react';
+import { api, unwrap } from '../api.js';
 
-const FIRMANTE_VACIO = { nombres: '', apellidoPaterno: '', apellidoMaterno: '', email: '' };
+const FIRMANTE_VACIO = { nombreCompleto: '', email: '' };
 
-export default function EnviarAFirmarModal({ contratoId, documento, onClose, onEnviado }) {
+export default function EnviarAFirmarModal({
+  contratoId,
+  documento,
+  contraparteNombre,
+  contraparteEmail,
+  onClose,
+  onEnviado,
+}) {
   const [ordenada, setOrdenada] = useState(false);
-  const [firmantes, setFirmantes] = useState([{ ...FIRMANTE_VACIO }]);
+  // Si el contrato ya tiene capturado el nombre o correo de la contraparte (ContratoForm.jsx),
+  // se usa para prellenar al primer firmante en vez de arrancar en blanco: casi siempre la
+  // contraparte es quien tiene que firmar.
+  const [firmantes, setFirmantes] = useState([
+    contraparteNombre || contraparteEmail
+    ? { nombreCompleto: contraparteNombre || '', email: contraparteEmail || '' }
+    : { ...FIRMANTE_VACIO },
+  ]);
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState('');
+  const [directorio, setDirectorio] = useState([]);
 
-  function actualizarFirmante(idx, campo, valor) {
+  useEffect(() => {
+    // Directorio interno (nombre + correo) para elegir un firmante de FPT sin escribirlo a
+    // mano. Si falla (p. ej. el backend todavía no tiene este endpoint), el modal sigue
+    // funcionando igual con captura manual.
+    api.get('/usuarios/directorio')
+    .then((data) => setDirectorio(unwrap(data, 'usuarios') || []))
+    .catch(() => {});
+  }, []);
+  
+      function actualizarFirmante(idx, campo, valor) {
     setFirmantes((prev) => prev.map((f, i) => (i === idx ? { ...f, [campo]: valor } : f)));
   }
+
+  function elegirDeDirectorio(idx, usuarioId) {
+const usuario = directorio.find((u) => String(u.id) === String(usuarioId));
+if (!usuario) return;
+setFirmantes((prev) =>
+  prev.map((f, i) => (i === idx ? { ...f, nombreCompleto: usuario.nombre, email: usuario.email } : f))
+);
+  }
+    
 
   function agregarFirmante() {
     setFirmantes((prev) => [...prev, { ...FIRMANTE_VACIO }]);
@@ -25,9 +58,9 @@ export default function EnviarAFirmarModal({ contratoId, documento, onClose, onE
     e.preventDefault();
     setError('');
 
-    const incompletos = firmantes.some((f) => !f.nombres.trim() || !f.apellidoPaterno.trim() || !f.email.trim());
+const incompletos = firmantes.some((f) => !f.nombreCompleto.trim() || !f.email.trim());
     if (incompletos) {
-      setError('Cada firmante necesita al menos nombre(s), apellido paterno y correo.');
+      setError('Cada firmante necesita al menos nombre completo y correo.');
       return;
     }
 
@@ -75,33 +108,32 @@ export default function EnviarAFirmarModal({ contratoId, documento, onClose, onE
           <label style={{ display: 'block', marginBottom: 6 }}>Firmantes *</label>
           {firmantes.map((f, idx) => (
             <div key={idx} className="form-row" style={{ alignItems: 'end', marginBottom: 8 }}>
-              <div className="field" style={{ marginBottom: 0 }}>
-                <label htmlFor={`firmante-nombres-${idx}`}>Nombre(s)</label>
-                <input
-                  id={`firmante-nombres-${idx}`}
-                  type="text"
-                  value={f.nombres}
-                  onChange={(e) => actualizarFirmante(idx, 'nombres', e.target.value)}
-                />
-              </div>
-              <div className="field" style={{ marginBottom: 0 }}>
-                <label htmlFor={`firmante-paterno-${idx}`}>Apellido paterno</label>
-                <input
-                  id={`firmante-paterno-${idx}`}
-                  type="text"
-                  value={f.apellidoPaterno}
-                  onChange={(e) => actualizarFirmante(idx, 'apellidoPaterno', e.target.value)}
-                />
-              </div>
-              <div className="field" style={{ marginBottom: 0 }}>
-                <label htmlFor={`firmante-materno-${idx}`}>Apellido materno</label>
-                <input
-                  id={`firmante-materno-${idx}`}
-                  type="text"
-                  value={f.apellidoMaterno}
-                  onChange={(e) => actualizarFirmante(idx, 'apellidoMaterno', e.target.value)}
-                />
-              </div>
+              {directorio.length > 0 && (
+<div className="field" style={{ marginBottom: 0 }}>
+<label htmlFor={`firmante-directorio-${idx}`}>Directorio interno</label>
+<select
+id={`firmante-directorio-${idx}`}
+value=""
+onChange={(e) => elegirDeDirectorio(idx, e.target.value)}
+>
+<option value="">Elegir…</option>
+  {directorio.map((u) => (
+<option key={u.id} value={u.id}>
+  {u.nombre}
+</option>
+))}
+</select>
+</div>
+)}
+<div className="field" style={{ marginBottom: 0 }}>
+<label htmlFor={`firmante-nombre-${idx}`}>Nombre completo</label>
+<input
+id={`firmante-nombre-${idx}`}
+type="text"
+value={f.nombreCompleto}
+onChange={(e) => actualizarFirmante(idx, 'nombreCompleto', e.target.value)}
+/>
+</div>
               <div className="field" style={{ marginBottom: 0 }}>
                 <label htmlFor={`firmante-email-${idx}`}>Correo</label>
                 <input
