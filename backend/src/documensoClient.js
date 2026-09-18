@@ -44,45 +44,45 @@
 // esas coordenadas reales en vez de las por defecto.
 
 function baseUrl() {
-  return (process.env.DOCUMENSO_URL || '').replace(/\/+$/, '');
+    return (process.env.DOCUMENSO_URL || '').replace(/\/+$/, '');
 }
 
 function configurado() {
-  return Boolean(baseUrl() && process.env.DOCUMENSO_API_TOKEN);
+    return Boolean(baseUrl() && process.env.DOCUMENSO_API_TOKEN);
 }
 
 async function llamar(metodo, path, { body, form } = {}) {
-  if (!configurado()) {
-    throw new Error('Faltan DOCUMENSO_URL / DOCUMENSO_API_TOKEN en las variables de entorno.');
-  }
-  const headers = { Authorization: process.env.DOCUMENSO_API_TOKEN };
-  let requestBody;
-  if (form) {
-    requestBody = form; // FormData nativo: fetch calcula el boundary multipart solo.
-  } else if (body) {
-    headers['Content-Type'] = 'application/json';
-    requestBody = JSON.stringify(body);
-  }
-  const resp = await fetch(`${baseUrl()}${path}`, { method: metodo, headers, body: requestBody });
-  const contentType = resp.headers.get('content-type') || '';
-  const texto = await resp.text();
-  let data = texto;
-  if (contentType.includes('application/json')) {
-    try {
-      data = JSON.parse(texto);
-    } catch {
-      /* se deja el texto crudo */
+    if (!configurado()) {
+          throw new Error('Faltan DOCUMENSO_URL / DOCUMENSO_API_TOKEN en las variables de entorno.');
     }
-  }
-  if (!resp.ok) {
-    const detalle = typeof data === 'string' ? data : JSON.stringify(data);
-    throw new Error(`Documenso respondió ${resp.status} en ${metodo} ${path}: ${detalle}`);
-  }
-  return data;
+    const headers = { Authorization: process.env.DOCUMENSO_API_TOKEN };
+    let requestBody;
+    if (form) {
+          requestBody = form; // FormData nativo: fetch calcula el boundary multipart solo.
+    } else if (body) {
+          headers['Content-Type'] = 'application/json';
+          requestBody = JSON.stringify(body);
+    }
+    const resp = await fetch(`${baseUrl()}${path}`, { method: metodo, headers, body: requestBody });
+    const contentType = resp.headers.get('content-type') || '';
+    const texto = await resp.text();
+    let data = texto;
+    if (contentType.includes('application/json')) {
+          try {
+                  data = JSON.parse(texto);
+          } catch {
+                  /* se deja el texto crudo */
+          }
+    }
+    if (!resp.ok) {
+          const detalle = typeof data === 'string' ? data : JSON.stringify(data);
+          throw new Error(`Documenso respondió ${resp.status} en ${metodo} ${path}: ${detalle}`);
+    }
+    return data;
 }
 
 function nombreCompleto(f) {
-  return [f.nombres, f.apellidoPaterno, f.apellidoMaterno].filter(Boolean).join(' ').trim();
+    return [f.nombres, f.apellidoPaterno, f.apellidoMaterno].filter(Boolean).join(' ').trim();
 }
 
 /**
@@ -91,21 +91,39 @@ function nombreCompleto(f) {
  * "columna" en X para no salirse de la página.
  */
 function areaPorDefecto(idx) {
-  const porColumna = 6;
-  const fila = idx % porColumna;
-  const columna = Math.floor(idx / porColumna);
-  return {
-    page: 1,
-    positionX: 6 + columna * 34,
-    positionY: 88 - fila * 9,
-    width: 28,
-    height: 6,
-  };
+    const porColumna = 6;
+    const fila = idx % porColumna;
+    const columna = Math.floor(idx / porColumna);
+    return {
+          page: 1,
+          positionX: 6 + columna * 34,
+          positionY: 88 - fila * 9,
+          width: 28,
+          height: 6,
+    };
 }
 
 /**
  * Envía un documento a firma: crea un "envelope" nuevo a partir de un PDF (sin plantilla
- * previa), un firmante (recipient) por cada elemento de `datos.firmantes`.
+ * previa), un firmante (recipient) por cada elemento de `datos.firmantes`, y luego lo
+ * DISTRIBUYE para que Documenso realmente mande los correos de invitación.
+ *
+ * *** BUG CORREGIDO (prueba final de firmas, sep 2026) ***
+ * A diferencia de DocuSeal (que mandaba el correo de invitación con una sola llamada),
+ * Documenso separa "crear" de "enviar" en dos pasos: POST /envelope/create solo deja el
+ * envelope en estatus DRAFT dentro de Documenso — nadie recibe nada todavía, aunque los
+ * firmantes ya queden cargados correctamente. Hay que llamar explícitamente a
+ * POST /envelope/distribute para que se dispare el envío real. Confirmado leyendo el código
+ * fuente de Documenso (self-hosted, AGPL-3.0):
+ *   - packages/trpc/server/envelope-router/distribute-envelope.ts es lo único que llama a
+ *     sendDocument() (el que de verdad manda los correos); create-envelope.ts nunca lo llama.
+ *   - packages/prisma/schema.prisma, enum DocumentSigningOrder = PARALLEL (default) |
+ *     SEQUENTIAL — el "signingOrder" numérico de cada firmante se IGNORA si no se manda también
+ *     "meta.signingOrder = 'SEQUENTIAL'" al crear el envelope; si no, Documenso los trata como
+ *     PARALLEL sin importar los números.
+ * Antes de esta corrección, el envelope se creaba con los firmantes correctos (visible en la UI
+ * de Documenso) pero se quedaba en borrador para siempre y ningún firmante recibía correo.
+ *
  * @param {{
  *   base64PDF: string,
  *   nombreDocumento: string,
@@ -115,55 +133,78 @@ function areaPorDefecto(idx) {
  * @returns {Promise<{submissionId: string, submitters: Array<{email: string, slug: string, embedSrc: string}>}>}
  */
 async function crearSubmission(datos) {
-  if (!Array.isArray(datos.firmantes) || datos.firmantes.length === 0) {
-    throw new Error('Se requiere al menos un firmante.');
-  }
+    if (!Array.isArray(datos.firmantes) || datos.firmantes.length === 0) {
+          throw new Error('Se requiere al menos un firmante.');
+    }
 
   const recipients = datos.firmantes.map((f, idx) => ({
-    email: f.email,
-    name: nombreCompleto(f) || f.email,
-    role: 'SIGNER',
-    // Si "ordenada" es true, cada firmante solo recibe el correo de invitación hasta que el
-    // anterior termine (orden real: signingOrder ascendente). Si no, se manda el mismo valor a
-    // todos para que Documenso los notifique en paralelo (cualquiera puede firmar primero).
-    signingOrder: datos.ordenada ? idx + 1 : 1,
-    fields: [
-      {
-        type: 'SIGNATURE',
-        ...areaPorDefecto(idx),
-      },
-    ],
+        email: f.email,
+        name: nombreCompleto(f) || f.email,
+        role: 'SIGNER',
+        // Si "ordenada" es true, cada firmante solo recibe el correo de invitación hasta que el
+        // anterior termine (orden real: signingOrder ascendente). Si no, se manda el mismo valor a
+        // todos para que Documenso los notifique en paralelo (cualquiera puede firmar primero).
+        // OJO: este número por sí solo no basta, ver "meta.signingOrder" abajo.
+        signingOrder: datos.ordenada ? idx + 1 : 1,
+        fields: [
+          {
+                    type: 'SIGNATURE',
+                    ...areaPorDefecto(idx),
+          },
+              ],
   }));
 
   const payload = {
-    type: 'DOCUMENT',
-    title: datos.nombreDocumento,
-    recipients,
+        type: 'DOCUMENT',
+        title: datos.nombreDocumento,
+        recipients,
+        // Sin esto, Documenso ignora el signingOrder de cada firmante (su default es PARALLEL) y
+        // notifica a todos al mismo tiempo, sin importar el orden que se haya mandado arriba.
+        meta: {
+                signingOrder: datos.ordenada ? 'SEQUENTIAL' : 'PARALLEL',
+        },
   };
 
   const form = new FormData();
-  form.append('payload', JSON.stringify(payload));
-  form.append(
-    'files',
-    new Blob([Buffer.from(datos.base64PDF, 'base64')], { type: 'application/pdf' }),
-    `${datos.nombreDocumento}.pdf`
-  );
+    form.append('payload', JSON.stringify(payload));
+    form.append(
+          'files',
+          new Blob([Buffer.from(datos.base64PDF, 'base64')], { type: 'application/pdf' }),
+          `${datos.nombreDocumento}.pdf`
+        );
 
-  const data = await llamar('POST', '/api/v2/envelope/create', { form });
-  if (!data?.id) {
-    throw new Error(`Documenso no regresó un id de envelope válido: ${JSON.stringify(data)}`);
-  }
+  const creado = await llamar('POST', '/api/v2/envelope/create', { form });
+    if (!creado?.id) {
+          throw new Error(`Documenso no regresó un id de envelope válido: ${JSON.stringify(creado)}`);
+    }
+
+
+  let distribuido;
+    try {
+          distribuido = await llamar('POST', '/api/v2/envelope/distribute', {
+                  body: { envelopeId: creado.id },
+          });
+    } catch (err) {
+          // El envelope SÍ quedó creado en Documenso (con id creado.id) pero no se pudo distribuir —
+      // se deja bien claro en el mensaje para no confundirlo con una falla de creación, ya que
+      // requiere revisar/reintentar puntualmente ese envelope en vez de mandar todo de nuevo.
+      throw new Error(
+              `El documento se creó en Documenso (envelope ${creado.id}) pero no se pudo enviar a los ` +
+                `firmantes: ${err.message}`
+            );
+    }
+
   return {
-    submissionId: String(data.id),
-    submitters: Array.isArray(data.recipients)
-      ? data.recipients.map((r) => ({ email: r.email, slug: r.token, embedSrc: r.signingUrl }))
-      : [],
+        submissionId: String(creado.id),
+        submitters: Array.isArray(distribuido?.recipients)
+          ? distribuido.recipients.map((r) => ({ email: r.email, slug: r.token, embedSrc: r.signingUrl }))
+                : [],
   };
 }
 
 /** Consulta el detalle/estatus actual de un envelope (fuente de verdad, nunca el webhook). */
 async function consultarSubmission(submissionId) {
-  return llamar('GET', `/api/v2/envelope/${submissionId}`);
+    return llamar('GET', `/api/v2/envelope/${submissionId}`);
 }
 
 /**
@@ -175,29 +216,29 @@ async function consultarSubmission(submissionId) {
  * que ajustarlo.
  */
 async function descargarDocumento(submissionId) {
-  const data = await consultarSubmission(submissionId);
-  const candidatos = [
-    data?.envelopeItems?.[0]?.documentData?.url,
-    data?.documents?.[0]?.url,
-    data?.downloadUrl,
-  ];
-  const url = candidatos.find(Boolean);
-  if (!url) {
-    throw new Error(
-      `No se encontró una URL de descarga en la respuesta de Documenso para el envelope ${submissionId}. ` +
-        `Respuesta: ${JSON.stringify(data)}`
-    );
-  }
-  const resp = await fetch(url);
-  if (!resp.ok) {
-    throw new Error(`No se pudo descargar el documento de Documenso (${resp.status}).`);
-  }
-  return Buffer.from(await resp.arrayBuffer());
+    const data = await consultarSubmission(submissionId);
+    const candidatos = [
+          data?.envelopeItems?.[0]?.documentData?.url,
+          data?.documents?.[0]?.url,
+          data?.downloadUrl,
+        ];
+    const url = candidatos.find(Boolean);
+    if (!url) {
+          throw new Error(
+                  `No se encontró una URL de descarga en la respuesta de Documenso para el envelope ${submissionId}. ` +
+                    `Respuesta: ${JSON.stringify(data)}`
+                );
+    }
+    const resp = await fetch(url);
+    if (!resp.ok) {
+          throw new Error(`No se pudo descargar el documento de Documenso (${resp.status}).`);
+    }
+    return Buffer.from(await resp.arrayBuffer());
 }
 
 module.exports = {
-  configurado,
-  crearSubmission,
-  consultarSubmission,
-  descargarDocumento,
+    configurado,
+    crearSubmission,
+    consultarSubmission,
+    descargarDocumento,
 };
