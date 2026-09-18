@@ -49,7 +49,7 @@ export default function NuevaSolicitud() {
 
   function agregarArchivos(fileList) {
         const nuevos = Array.from(fileList || []);
-            nuevos.length === 0) return;
+                if (nuevos.length === 0) return;
         setArchivos((actuales) => {
                 // Evita duplicados obvios (mismo nombre + tamaño) si el usuario abre el selector dos veces.
                           const claves = new Set(actuales.map((f) => `${f.name}__${f.size}`));
