@@ -1031,16 +1031,25 @@ router.post(
     const bufferDocumento = await storageContratos.obtenerBuffer(documento.ruta_archivo);
     const base64PDF = bufferDocumento.toString('base64');
 
-    const { submissionId } = await documenso.crearSubmission({
+    const { submissionId, submitters } = await documenso.crearSubmission({
       base64PDF,
       nombreDocumento: `${contrato.folio} - ${documento.nombre_archivo}`.slice(0, 250),
       ordenada,
       firmantes,
     });
 
+               // Se guarda el enlace de firma (signingUrl) de cada firmante junto con sus datos, para poder
+    // armar un enlace "pre-calentado" desde el frontend (ver FirmarEspera.jsx): asi la firma no
+    // depende solo del correo automatico de Documenso, cuyo link directo puede toparse con el
+    // sleep del plan gratuito de Render.
+    const firmantesConEnlace = firmantes.map((f) => {
+      const submitter = submitters.find((s) => s.email === f.email);
+      return { ...f, signingUrl: submitter ? submitter.embedSrc : null };
+    });
+
     await firmaElectronica.marcarEnviado(documento.id, {
       submissionId,
-      firmantes,
+      firmantes: firmantesConEnlace,
       usuarioId: req.usuario.id,
     });
 
@@ -1056,7 +1065,7 @@ router.post(
     res.json({
       documentoId: documento.id,
       submissionId,
-      firmantes,
+      firmantes: firmantesConEnlace,
     });
   })
 );
