@@ -430,7 +430,13 @@ export default function DetalleContrato() {
               )}
             </div>
             {errorGenerarDocumento && <div className="alert alert-error">{errorGenerarDocumento}</div>}
-            <DocumentosContrato contratoId={contrato.id} documentos={documentos} onSubido={cargar} />
+            <DocumentosContrato
+              contratoId={contrato.id}
+              documentos={documentos}
+              onSubido={cargar}
+              contraparteNombre={contrato.contraparteNombre}
+              contraparteEmail={contrato.contraparteEmail}
+              />
           </div>
         </div>
 
