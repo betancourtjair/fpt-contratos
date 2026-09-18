@@ -1017,16 +1017,14 @@ router.post(
     const firmantesEntrada = Array.isArray(body.firmantes) ? body.firmantes : [];
     if (firmantesEntrada.length === 0) throw badRequest('Se requiere al menos un firmante.');
     const firmantes = firmantesEntrada.map((f, idx) => {
-      if (!f?.nombres || !f?.apellidoPaterno || !f?.email) {
-        throw badRequest(`El firmante #${idx + 1} necesita al menos nombres, apellidoPaterno y email.`);
-      }
-      return {
-        nombres: String(f.nombres).trim(),
-        apellidoPaterno: String(f.apellidoPaterno).trim(),
-        apellidoMaterno: f.apellidoMaterno ? String(f.apellidoMaterno).trim() : '',
-        email: String(f.email).trim(),
-        orden: Number.isFinite(Number(f.orden)) ? Number(f.orden) : idx + 1,
-      };
+        if (!f?.nombreCompleto || !f?.email) {
+          throw badRequest(`El firmante #${idx + 1} necesita al menos nombre completo y correo.`);
+        }
+        return {
+          nombreCompleto: String(f.nombreCompleto).trim(),
+          email: String(f.email).trim(),
+          orden: Number.isFinite(Number(f.orden)) ? Number(f.orden) : idx + 1,
+        };
     });
     const ordenada = Boolean(body.ordenada);
 
