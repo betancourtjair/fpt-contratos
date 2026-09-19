@@ -23,6 +23,8 @@ export default function EnviarAFirmarModal({
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState('');
   const [directorio, setDirectorio] = useState([]);
+  const [enlacesFirma, setEnlacesFirma] = useState(null);
+  const [copiadoIdx, setCopiadoIdx] = useState(null);
 
   useEffect(() => {
     // Directorio interno (nombre + correo) para elegir un firmante de FPT sin escribirlo a
@@ -54,6 +56,18 @@ setFirmantes((prev) =>
     setFirmantes((prev) => prev.filter((_, i) => i !== idx));
   }
 
+  async function copiarEnlace(idx, url, nombre) {
+    const base = `${window.location.origin}${window.location.pathname}`;
+    const enlace = `${base}#/firmar-espera?url=${encodeURIComponent(url)}&nombre=${encodeURIComponent(nombre || '')}`;
+    try {
+      await navigator.clipboard.writeText(enlace);
+      setCopiadoIdx(idx);
+      setTimeout(() => setCopiadoIdx(null), 2000);
+    } catch {
+      window.prompt('Copia este enlace:', enlace);
+    }
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
@@ -66,17 +80,52 @@ const incompletos = firmantes.some((f) => !f.nombreCompleto.trim() || !f.email.t
 
     setEnviando(true);
     try {
-      await api.post(`/contratos/${contratoId}/documentos/${documento.id}/enviar-a-firmar`, {
+      const resp = await api.post(`/contratos/${contratoId}/documentos/${documento.id}/enviar-a-firmar`, {
         ordenada,
         firmantes: firmantes.map((f, idx) => ({ ...f, orden: idx + 1 })),
       });
       onEnviado?.();
-      onClose?.();
+      const conEnlace = (resp?.firmantes || []).filter((f) => f.signingUrl);
+      if (conEnlace.length > 0) {
+        setEnlacesFirma(conEnlace);
+      } else {
+        onClose?.();
+      }
     } catch (err) {
       setError(err.message || 'No se pudo enviar el documento a firmar.');
     } finally {
       setEnviando(false);
     }
+  }
+  if (enlacesFirma) {
+    return (
+      <div className="modal-backdrop" onClick={onClose}>
+        <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <h3>Documento enviado a firmar</h3>
+        <p className="muted" style={{ fontSize: 13, marginTop: -8 }}>
+        Documenso ya envió el correo de firma. Si el firmante tarda en entrar (el servicio
+        puede tardar en despertar), comparte este enlace alterno por WhatsApp u otro medio:
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, margin: '12px 0' }}>
+          {enlacesFirma.map((f, idx) => (
+        <button
+          key={idx}
+          type="button"
+          className="icon-btn"
+          onClick={() => copiarEnlace(idx, f.signingUrl, f.nombreCompleto)}
+          >
+          {copiadoIdx === idx ? 'Enlace copiado' : `Copiar enlace: ${f.nombreCompleto}`}
+        </button>
+        ))}
+        </div>
+        <div className="modal-actions">
+        <button type="button" className="btn btn-primary" onClick={onClose}>
+        Listo
+        </button>
+        </div>
+        </div>
+      </div>
+      );
   }
 
   return (
