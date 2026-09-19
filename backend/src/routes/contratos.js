@@ -383,11 +383,33 @@ router.get(
       franquicia = franquiciaRows[0] || null;
     }
 
+    let contraparteDetalle = null;
+    let nda = null;
+    let servicios = null;
+    if (tipoContrato?.es_nda || tipoContrato?.es_servicios) {
+      const { rows: contraparteRows } = await query(
+        'SELECT * FROM contrato_contraparte_detalles WHERE contrato_id = $1',
+        [contrato.id]
+      );
+      contraparteDetalle = contraparteRows[0] || null;
+    }
+    if (tipoContrato?.es_nda) {
+      const { rows: ndaRows } = await query('SELECT * FROM contrato_nda_detalles WHERE contrato_id = $1', [contrato.id]);
+      nda = ndaRows[0] || null;
+    }
+    if (tipoContrato?.es_servicios) {
+      const { rows: serviciosRows } = await query('SELECT * FROM contrato_servicios_detalles WHERE contrato_id = $1', [contrato.id]);
+      servicios = serviciosRows[0] || null;
+    }
+
     res.json({
       contrato: { ...contrato, tipoContrato },
       aprobaciones,
       documentos: documentosConUrl,
       franquicia,
+      contraparteDetalle,
+      nda,
+      servicios,
     });
   })
 );
@@ -519,6 +541,276 @@ router.put(
       });
 
       res.json({ franquicia: rows[0] });
+    } catch (err) {
+      const traducido = traducirErrorPostgres(err);
+      if (traducido) throw traducido;
+      throw err;
+    }
+  })
+);
+
+// ---------------------------------------------------------------------------
+// PUT /api/contratos/:id/contraparte-detalle - datos ampliados de la contraparte (persona
+// física/moral) + administrador interno. Aplica a los tipos marcados es_nda o es_servicios;
+// el resto de tipos sigue usando solo los campos planos (contraparte_nombre, contraparte_rfc,
+// etc.) que ya vienen en el POST /contratos. Mismo permiso/estado que /franquicia: dueño del
+// borrador, o un rol privilegiado en cualquier momento.
+// ---------------------------------------------------------------------------
+const CAMPOS_CONTRAPARTE_DETALLE = [
+  'tipoPersona', 'representanteLegalNombre', 'nacionalidad', 'curp', 'domicilio',
+  'administradorInternoNombre',
+];
+const MAPA_COLUMNAS_CONTRAPARTE_DETALLE = {
+  tipoPersona: 'tipo_persona',
+  representanteLegalNombre: 'representante_legal_nombre',
+  nacionalidad: 'nacionalidad',
+  curp: 'curp',
+  domicilio: 'domicilio',
+  administradorInternoNombre: 'administrador_interno_nombre',
+};
+const TIPOS_PERSONA_VALIDOS = ['fisica', 'moral'];
+
+function puedeEditarDetalleTipo(contrato, usuario) {
+  const esDueño = contrato.solicitado_por_id === usuario.id;
+  if (esRolPrivilegiado(usuario.rol)) return true;
+  if (!esDueño) throw forbidden('No puedes editar los datos de un contrato que no solicitaste.');
+  if (contrato.estatus !== 'borrador') {
+    throw forbidden('Solo se pueden editar estos datos mientras el contrato está en borrador.');
+  }
+  return true;
+}
+
+router.put(
+  '/:id/contraparte-detalle',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const contrato = await cargarContrato(req.params.id);
+    if (!contrato) throw notFound('Contrato no encontrado.');
+    puedeEditarDetalleTipo(contrato, req.usuario);
+
+    const { rows: tipoRows } = await query('SELECT * FROM tipos_contrato WHERE id = $1', [contrato.tipo_contrato_id]);
+    if (!tipoRows[0]?.es_nda && !tipoRows[0]?.es_servicios) {
+      throw badRequest('Este contrato no es de un tipo que pida datos ampliados de la contraparte.');
+    }
+
+    const body = req.body || {};
+    if (body.tipoPersona && !TIPOS_PERSONA_VALIDOS.includes(body.tipoPersona)) {
+      throw badRequest(`tipoPersona inválido. Valores permitidos: ${TIPOS_PERSONA_VALIDOS.join(', ')}.`);
+    }
+
+    const columnas = ['contrato_id'];
+    const marcadores = ['$1'];
+    const valores = [contrato.id];
+    const actualizaciones = [];
+    let i = 2;
+
+    for (const campo of CAMPOS_CONTRAPARTE_DETALLE) {
+      if (body[campo] === undefined) continue;
+      const columna = MAPA_COLUMNAS_CONTRAPARTE_DETALLE[campo];
+      const valor = body[campo] === '' ? null : body[campo];
+      columnas.push(columna);
+      marcadores.push(`$${i}`);
+      valores.push(valor);
+      actualizaciones.push(`${columna} = $${i}`);
+      i++;
+    }
+    actualizaciones.push('updated_at = now()');
+
+    try {
+      const { rows } = await query(
+        `INSERT INTO contrato_contraparte_detalles (${columnas.join(', ')})
+         VALUES (${marcadores.join(', ')})
+         ON CONFLICT (contrato_id) DO UPDATE SET ${actualizaciones.join(', ')}
+         RETURNING *`,
+        valores
+      );
+      await registrarAuditoria({
+        contratoId: contrato.id,
+        usuarioId: req.usuario.id,
+        accion: 'contraparte_detalle_actualizado',
+        detalle: 'Se actualizaron los datos ampliados de la contraparte del contrato.',
+      });
+      res.json({ contraparteDetalle: rows[0] });
+    } catch (err) {
+      const traducido = traducirErrorPostgres(err);
+      if (traducido) throw traducido;
+      throw err;
+    }
+  })
+);
+
+// ---------------------------------------------------------------------------
+// PUT /api/contratos/:id/nda - datos propios de la solicitud de NDA (solo tipos es_nda).
+// ---------------------------------------------------------------------------
+const CAMPOS_NDA = ['descripcionProyecto', 'tipoInformacion', 'fechaFirma', 'comentarios'];
+const MAPA_COLUMNAS_NDA = {
+  descripcionProyecto: 'descripcion_proyecto',
+  tipoInformacion: 'tipo_informacion',
+  fechaFirma: 'fecha_firma',
+  comentarios: 'comentarios',
+};
+
+router.put(
+  '/:id/nda',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const contrato = await cargarContrato(req.params.id);
+    if (!contrato) throw notFound('Contrato no encontrado.');
+    puedeEditarDetalleTipo(contrato, req.usuario);
+
+    const { rows: tipoRows } = await query('SELECT * FROM tipos_contrato WHERE id = $1', [contrato.tipo_contrato_id]);
+    if (!tipoRows[0]?.es_nda) {
+      throw badRequest('Este contrato no es de un tipo marcado como NDA.');
+    }
+
+    const body = req.body || {};
+    const columnas = ['contrato_id'];
+    const marcadores = ['$1'];
+    const valores = [contrato.id];
+    const actualizaciones = [];
+    let i = 2;
+
+    for (const campo of CAMPOS_NDA) {
+      if (body[campo] === undefined) continue;
+      const columna = MAPA_COLUMNAS_NDA[campo];
+      const valor = body[campo] === '' ? null : body[campo];
+      columnas.push(columna);
+      marcadores.push(`$${i}`);
+      valores.push(valor);
+      actualizaciones.push(`${columna} = $${i}`);
+      i++;
+    }
+    actualizaciones.push('updated_at = now()');
+
+    try {
+      const { rows } = await query(
+        `INSERT INTO contrato_nda_detalles (${columnas.join(', ')})
+         VALUES (${marcadores.join(', ')})
+         ON CONFLICT (contrato_id) DO UPDATE SET ${actualizaciones.join(', ')}
+         RETURNING *`,
+        valores
+      );
+      await registrarAuditoria({
+        contratoId: contrato.id,
+        usuarioId: req.usuario.id,
+        accion: 'nda_datos_actualizados',
+        detalle: 'Se actualizaron los datos de la solicitud de NDA.',
+      });
+      res.json({ nda: rows[0] });
+    } catch (err) {
+      const traducido = traducirErrorPostgres(err);
+      if (traducido) throw traducido;
+      throw err;
+    }
+  })
+);
+
+// ---------------------------------------------------------------------------
+// PUT /api/contratos/:id/servicios - datos propios de la solicitud de prestación de
+// servicios (solo tipos es_servicios). Cuando lugarPrestacion = 'instalaciones_fpt' se
+// vuelve "servicios especializados" y se exigen lugarExacto/repse/registroPatronal/
+// numeroTrabajadores.
+// ---------------------------------------------------------------------------
+const CAMPOS_SERVICIOS = [
+  'descripcionServicios', 'actividadesPrestador', 'cronograma', 'lugarPrestacion',
+  'lugarExacto', 'repse', 'registroPatronal', 'numeroTrabajadores', 'incluyeIva',
+  'condicionesPago', 'garantias', 'fechaFirma',
+];
+const MAPA_COLUMNAS_SERVICIOS = {
+  descripcionServicios: 'descripcion_servicios',
+  actividadesPrestador: 'actividades_prestador',
+  cronograma: 'cronograma',
+  lugarPrestacion: 'lugar_prestacion',
+  lugarExacto: 'lugar_exacto',
+  repse: 'repse',
+  registroPatronal: 'registro_patronal',
+  numeroTrabajadores: 'numero_trabajadores',
+  incluyeIva: 'incluye_iva',
+  condicionesPago: 'condiciones_pago',
+  garantias: 'garantias',
+  fechaFirma: 'fecha_firma',
+};
+const LUGARES_PRESTACION_VALIDOS = ['instalaciones_proveedor', 'remoto', 'ubicacion_terceros', 'instalaciones_fpt'];
+const CAMPOS_SOLO_SERVICIOS_ESPECIALIZADOS = ['lugarExacto', 'repse', 'registroPatronal', 'numeroTrabajadores'];
+
+router.put(
+  '/:id/servicios',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const contrato = await cargarContrato(req.params.id);
+    if (!contrato) throw notFound('Contrato no encontrado.');
+    puedeEditarDetalleTipo(contrato, req.usuario);
+
+    const { rows: tipoRows } = await query('SELECT * FROM tipos_contrato WHERE id = $1', [contrato.tipo_contrato_id]);
+    if (!tipoRows[0]?.es_servicios) {
+      throw badRequest('Este contrato no es de un tipo marcado como prestación de servicios.');
+    }
+
+    const body = req.body || {};
+    if (body.lugarPrestacion && !LUGARES_PRESTACION_VALIDOS.includes(body.lugarPrestacion)) {
+      throw badRequest(`lugarPrestacion inválido. Valores permitidos: ${LUGARES_PRESTACION_VALIDOS.join(', ')}.`);
+    }
+
+    // Se calcula contra lo que ya está guardado + lo que llega en este PUT, para no exigir
+    // reenviar todo el bloque de "servicios especializados" cada vez que se actualiza un solo campo.
+    const { rows: actualRows } = await query(
+      'SELECT * FROM contrato_servicios_detalles WHERE contrato_id = $1',
+      [contrato.id]
+    );
+    const actual = actualRows[0] || {};
+    const lugarResultante = body.lugarPrestacion !== undefined ? body.lugarPrestacion : actual.lugar_prestacion;
+    if (lugarResultante === 'instalaciones_fpt') {
+      for (const campo of CAMPOS_SOLO_SERVICIOS_ESPECIALIZADOS) {
+        const columna = MAPA_COLUMNAS_SERVICIOS[campo];
+        const valorNuevo = body[campo];
+        const valorResultante = valorNuevo !== undefined ? valorNuevo : actual[columna];
+        if (valorResultante === undefined || valorResultante === null || valorResultante === '') {
+          throw badRequest(
+            `${campo} es obligatorio cuando los servicios se prestan en las instalaciones de FPT (servicios especializados).`
+          );
+        }
+      }
+    }
+    if (body.numeroTrabajadores !== undefined && body.numeroTrabajadores !== null && body.numeroTrabajadores !== '') {
+      const num = Number(body.numeroTrabajadores);
+      if (!Number.isInteger(num) || num < 0) {
+        throw badRequest('numeroTrabajadores debe ser un número entero válido.');
+      }
+    }
+
+    const columnas = ['contrato_id'];
+    const marcadores = ['$1'];
+    const valores = [contrato.id];
+    const actualizaciones = [];
+    let i = 2;
+
+    for (const campo of CAMPOS_SERVICIOS) {
+      if (body[campo] === undefined) continue;
+      const columna = MAPA_COLUMNAS_SERVICIOS[campo];
+      const valor = body[campo] === '' ? null : body[campo];
+      columnas.push(columna);
+      marcadores.push(`$${i}`);
+      valores.push(valor);
+      actualizaciones.push(`${columna} = $${i}`);
+      i++;
+    }
+    actualizaciones.push('updated_at = now()');
+
+    try {
+      const { rows } = await query(
+        `INSERT INTO contrato_servicios_detalles (${columnas.join(', ')})
+         VALUES (${marcadores.join(', ')})
+         ON CONFLICT (contrato_id) DO UPDATE SET ${actualizaciones.join(', ')}
+         RETURNING *`,
+        valores
+      );
+      await registrarAuditoria({
+        contratoId: contrato.id,
+        usuarioId: req.usuario.id,
+        accion: 'servicios_datos_actualizados',
+        detalle: 'Se actualizaron los datos de la solicitud de prestación de servicios.',
+      });
+      res.json({ servicios: rows[0] });
     } catch (err) {
       const traducido = traducirErrorPostgres(err);
       if (traducido) throw traducido;
@@ -819,6 +1111,11 @@ router.post(
     if (!categoriasValidas.includes(categoria)) {
       throw badRequest(`categoria inválida. Valores permitidos: ${categoriasValidas.join(', ')}.`);
     }
+    // Etiqueta libre para el checklist de documentos con nombre específico que piden NDA y
+    // servicios (ej. "escritura_constitutiva", "repse"; ver DOCUMENTOS_REQUERIDOS en
+    // frontend/src/components/ContratoForm.jsx). No aplica a un enum en BD: null = documento
+    // genérico, el comportamiento de siempre.
+    const etiqueta = req.body.etiqueta || null;
 
     const grupoIdSolicitado = req.body.grupoId || null;
     let anterior = null;
@@ -856,16 +1153,16 @@ router.post(
           );
           const { rows } = await client.query(
             `INSERT INTO contrato_documentos
-               (contrato_id, nombre_archivo, ruta_archivo, categoria, subido_por_id, grupo_id, version, reemplaza_a_id, es_version_actual)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true) RETURNING *`,
-            [contrato.id, req.file.originalname, rutaArchivo, categoria, req.usuario.id, anterior.grupo_id, anterior.version + 1, anterior.id]
+               (contrato_id, nombre_archivo, ruta_archivo, categoria, subido_por_id, grupo_id, version, reemplaza_a_id, es_version_actual, etiqueta)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, $9) RETURNING *`,
+            [contrato.id, req.file.originalname, rutaArchivo, categoria, req.usuario.id, anterior.grupo_id, anterior.version + 1, anterior.id, etiqueta]
           );
           return rows[0];
         }
         const { rows } = await client.query(
-          `INSERT INTO contrato_documentos (contrato_id, nombre_archivo, ruta_archivo, categoria, subido_por_id, grupo_id, version)
-           VALUES ($1, $2, $3, $4, $5, gen_random_uuid(), 1) RETURNING *`,
-          [contrato.id, req.file.originalname, rutaArchivo, categoria, req.usuario.id]
+          `INSERT INTO contrato_documentos (contrato_id, nombre_archivo, ruta_archivo, categoria, subido_por_id, grupo_id, version, etiqueta)
+           VALUES ($1, $2, $3, $4, $5, gen_random_uuid(), 1, $6) RETURNING *`,
+          [contrato.id, req.file.originalname, rutaArchivo, categoria, req.usuario.id, etiqueta]
         );
         return rows[0];
       });
