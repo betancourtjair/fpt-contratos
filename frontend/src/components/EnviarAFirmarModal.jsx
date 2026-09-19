@@ -142,7 +142,7 @@ const incompletos = firmantes.some((f) => !f.nombreCompleto.trim() || !f.email.t
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal" style={{ maxWidth: 720 }} onClick={(e) => e.stopPropagation()}>
         <h3>Enviar a firmar por Documenso</h3>
         <p className="muted" style={{ fontSize: 13, marginTop: -8 }}>
           Documento: <b>{documento.nombreArchivo}</b>
