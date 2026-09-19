@@ -321,3 +321,83 @@ ALTER TABLE contrato_documentos ADD COLUMN documenso_firmado_en TIMESTAMPTZ;
 ALTER TABLE contrato_documentos ADD COLUMN documenso_rechazado_en TIMESTAMPTZ;
 CREATE INDEX idx_contrato_documentos_documenso_id ON contrato_documentos(documenso_submission_id)
   WHERE documenso_submission_id IS NOT NULL;
+
+-- ---------------------------------------------------------------------------
+-- Solicitud dinámica por tipo de contrato: a partir de ahora, "Confidencialidad (NDA)" y
+-- "Servicios Profesionales" piden campos propios (además de una versión más completa de los
+-- datos de la contraparte), documentados por jurídico. Mismo patrón que franquicias:
+-- tipos_contrato.es_* marca el tipo y una tabla de detalle 1:1 con contratos guarda sus
+-- campos. Todas las columnas quedan NULLable a nivel de BD: lo obligatorio se valida en la
+-- app (ver validarContrato en frontend/src/components/ContratoForm.jsx), igual que ya pasa
+-- con contrato_franquicia_detalles.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE tipos_contrato ADD COLUMN es_nda BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE tipos_contrato ADD COLUMN es_servicios BOOLEAN NOT NULL DEFAULT false;
+
+UPDATE tipos_contrato SET es_nda = true WHERE nombre = 'Confidencialidad (NDA)';
+UPDATE tipos_contrato SET es_servicios = true WHERE nombre = 'Servicios Profesionales';
+
+-- Datos ampliados de la contraparte (persona física/moral) + administrador interno del
+-- contrato. El nombre, RFC, contacto y correo de la contraparte se siguen guardando en las
+-- columnas planas que ya existían en "contratos" (contraparte_nombre, contraparte_rfc,
+-- contraparte_contacto, contraparte_email); aquí solo vive lo que esos campos no cubrían.
+CREATE TABLE contrato_contraparte_detalles (
+  contrato_id UUID PRIMARY KEY REFERENCES contratos(id) ON DELETE CASCADE,
+  tipo_persona TEXT, -- 'fisica' | 'moral'
+
+  representante_legal_nombre TEXT, -- solo persona moral
+
+  nacionalidad TEXT, -- solo persona física
+  curp TEXT,          -- solo persona física
+
+  domicilio TEXT, -- ambos tipos de persona
+
+  administrador_interno_nombre TEXT, -- "Datos internos"
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Solicitud de NDA.
+CREATE TABLE contrato_nda_detalles (
+  contrato_id UUID PRIMARY KEY REFERENCES contratos(id) ON DELETE CASCADE,
+  descripcion_proyecto TEXT, -- proyecto/negociación/operación que origina el intercambio
+  tipo_informacion TEXT,     -- qué tipo de información se pretende compartir
+  fecha_firma DATE,
+  comentarios TEXT,          -- comentario adicional [Opcional]
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Solicitud de prestación de servicios / servicios especializados. Cuando lugar_prestacion =
+-- 'instalaciones_fpt' se vuelve "servicios especializados": el formulario exige además
+-- lugar_exacto, repse, registro_patronal y numero_trabajadores (validado en la app, no aquí).
+CREATE TABLE contrato_servicios_detalles (
+  contrato_id UUID PRIMARY KEY REFERENCES contratos(id) ON DELETE CASCADE,
+  descripcion_servicios TEXT,
+  actividades_prestador TEXT,
+  cronograma TEXT, -- hitos o fechas de entrega
+  lugar_prestacion TEXT, -- 'instalaciones_proveedor' | 'remoto' | 'ubicacion_terceros' | 'instalaciones_fpt'
+
+  -- Solo si lugar_prestacion = 'instalaciones_fpt' ("servicios especializados")
+  lugar_exacto TEXT,
+  repse TEXT,
+  registro_patronal TEXT,
+  numero_trabajadores INT,
+
+  -- Contraprestación (importe y moneda ya viven en contratos.monto / contratos.moneda)
+  incluye_iva BOOLEAN,
+  condiciones_pago TEXT,
+  garantias TEXT, -- [Opcional]
+
+  fecha_firma DATE,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Documentos con nombre específico del checklist de jurídico (ej. "escritura_constitutiva",
+-- "repse", "proyecto_nda"; ver DOCUMENTOS_REQUERIDOS en ContratoForm.jsx). NULL = documento
+-- genérico sin etiquetar, el comportamiento de siempre.
+ALTER TABLE contrato_documentos ADD COLUMN etiqueta TEXT;

@@ -3,7 +3,7 @@ import { api, unwrap } from '../../api.js';
 import Spinner from '../../components/Spinner.jsx';
 import { formatFechaHora } from '../../utils.js';
 
-const VACIO = { id: null, nombre: '', descripcion: '', activo: true, esFranquicia: false };
+const VACIO = { id: null, nombre: '', descripcion: '', activo: true, esFranquicia: false, esNda: false, esServicios: false };
 
 export default function TiposContrato() {
   const [tipos, setTipos] = useState([]);
@@ -58,6 +58,8 @@ export default function TiposContrato() {
       descripcion: tipo.descripcion || '',
       activo: tipo.activo !== false,
       esFranquicia: !!tipo.esFranquicia,
+      esNda: !!tipo.esNda,
+      esServicios: !!tipo.esServicios,
     });
     setErrorForm('');
     setErrorPlantilla('');
@@ -80,6 +82,8 @@ export default function TiposContrato() {
           descripcion: valores.descripcion,
           activo: valores.activo,
           esFranquicia: valores.esFranquicia,
+          esNda: valores.esNda,
+          esServicios: valores.esServicios,
         });
         await cargar();
       } else {
@@ -88,6 +92,8 @@ export default function TiposContrato() {
           descripcion: valores.descripcion,
           activo: valores.activo,
           esFranquicia: valores.esFranquicia,
+          esNda: valores.esNda,
+          esServicios: valores.esServicios,
         });
         setFormAbierto(false);
         await cargar();
@@ -202,6 +208,28 @@ export default function TiposContrato() {
                 Es contrato de franquicia (activa sus campos y notificaciones especiales)
               </label>
             </div>
+            <div className="field checkbox-row">
+              <input
+                id="esNda"
+                type="checkbox"
+                checked={valores.esNda}
+                onChange={(e) => setValores({ ...valores, esNda: e.target.checked })}
+              />
+              <label htmlFor="esNda" style={{ marginBottom: 0 }}>
+                Es NDA / confidencialidad (activa los campos de solicitud de NDA)
+              </label>
+            </div>
+            <div className="field checkbox-row">
+              <input
+                id="esServicios"
+                type="checkbox"
+                checked={valores.esServicios}
+                onChange={(e) => setValores({ ...valores, esServicios: e.target.checked })}
+              />
+              <label htmlFor="esServicios" style={{ marginBottom: 0 }}>
+                Es prestación de servicios (activa REPSE, ubicación y demás campos de servicios)
+              </label>
+            </div>
             <div className="form-actions">
               <button type="submit" className="btn btn-primary" disabled={guardando}>
                 {guardando ? 'Guardando…' : 'Guardar'}
@@ -299,7 +327,7 @@ export default function TiposContrato() {
               <tr>
                 <th>Nombre</th>
                 <th>Descripción</th>
-                <th>Franquicia</th>
+                <th>Campos dinámicos</th>
                 <th>Plantilla</th>
                 <th>Estatus</th>
                 <th></th>
@@ -313,7 +341,12 @@ export default function TiposContrato() {
                   <tr key={t.id}>
                     <td>{t.nombre}</td>
                     <td className="muted">{t.descripcion || '—'}</td>
-                    <td>{t.esFranquicia ? <span className="tag-pill">Franquicia</span> : <span className="muted">—</span>}</td>
+                    <td style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {t.esFranquicia && <span className="tag-pill">Franquicia</span>}
+                      {t.esNda && <span className="tag-pill">NDA</span>}
+                      {t.esServicios && <span className="tag-pill">Servicios</span>}
+                      {!t.esFranquicia && !t.esNda && !t.esServicios && <span className="muted">—</span>}
+                    </td>
                     <td>{t.plantillaNombreArchivo ? <span className="tag-pill">Cargada</span> : <span className="muted">—</span>}</td>
                     <td>
                       <span className={`badge ${t.activo !== false ? 'badge-activo' : 'badge-cancelado'}`}>
@@ -328,7 +361,7 @@ export default function TiposContrato() {
                     </td>
                   </tr>
                 ))
-              )}
+              }
             </tbody>
           </table>
         </div>
