@@ -361,7 +361,7 @@ export default function TiposContrato() {
                     </td>
                   </tr>
                 ))
-              }
+              )}
             </tbody>
           </table>
         </div>
