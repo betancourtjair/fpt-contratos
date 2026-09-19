@@ -38,10 +38,15 @@
 // identifica a toda la cuenta/equipo.
 //
 // La posición del campo de firma en el PDF se manda como porcentaje (0-100) del tamaño de la
-// página (a diferencia de DocuSeal, que usaba fracción 0-1) — se usa una posición por defecto,
-// apilando una firma debajo de otra en la primera página; si en el futuro se agrega un editor
-// visual para que el usuario marque el lugar exacto de su firma, aquí es donde hay que mandar
-// esas coordenadas reales en vez de las por defecto.
+// página (a diferencia de DocuSeal, que usaba fracción 0-1), con origen (0,0) en la esquina
+// superior izquierda — confirmado en la documentación oficial (docs.documenso.com/docs/
+// developers/api/fields, sección "Field Positioning"): esos porcentajes son relativos al tamaño
+// real de la página en cuestión, así que se comportan igual sin importar el tamaño u orientación
+// del PDF. Desde el editor visual en EnviarAFirmarModal.jsx (arrastrar un recuadro sobre el PDF
+// renderizado con pdfjs-dist) cada firmante trae su propia `area` ya en ese mismo formato — ver
+// `f.area` en crearSubmission() más abajo. Si no la trae (petición vieja, o uso directo del API
+// sin pasar por la UI), se usa `areaPorDefecto(idx)`, que apila una firma debajo de otra en la
+// primera página.
 
 function baseUrl() {
     return (process.env.DOCUMENSO_URL || '').replace(/\/+$/, '');
@@ -128,7 +133,7 @@ function areaPorDefecto(idx) {
  *   base64PDF: string,
  *   nombreDocumento: string,
  *   ordenada: boolean,
-    *   firmantes: Array<{nombreCompleto: string, email: string, orden: number}>,
+    *   firmantes: Array<{nombreCompleto: string, email: string, orden: number, area?: {page: number, positionX: number, positionY: number, width: number, height: number}}>,
     * }} datos
     * @returns {Promise<{submissionId: string, submitters: Array<{email: string, slug: string, embedSrc: string}>}>}
  */
@@ -149,7 +154,9 @@ async function crearSubmission(datos) {
         fields: [
           {
                     type: 'SIGNATURE',
-                    ...areaPorDefecto(idx),
+                    // Recuadro dibujado a mano por el usuario en el editor visual; si no vino
+                    // (petición vieja o uso directo del API), se cae a la posición automática.
+                    ...(f.area || areaPorDefecto(idx)),
           },
               ],
   }));

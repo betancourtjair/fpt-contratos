@@ -56,6 +56,47 @@ function esRolPrivilegiado(rol) {
   return ['super_admin', 'admin', 'juridico'].includes(rol);
 }
 
+/**
+ * Valida el área (page/positionX/positionY/width/height) que el usuario dibujó a mano sobre el
+ * PDF en el editor visual de EnviarAFirmarModal.jsx para un firmante dado. Si no viene `area`
+ * (p. ej. un cliente viejo, o un uso directo del API), se regresa `null` y quien llame debe caer
+ * de vuelta a la posición automática (documensoClient.areaPorDefecto). Los rangos y el "1-indexed"
+ * de `page` respetan tal cual el esquema de Documenso (positionX/Y/width/height son porcentajes
+ * 0-100 del tamaño real de esa página, ver docs/developers/api/fields del API de Documenso).
+ */
+function validarArea(area, idxFirmante) {
+  if (area === undefined || area === null) return null;
+  const numero = (valor, campo) => {
+    const n = Number(valor);
+    if (!Number.isFinite(n)) {
+      throw badRequest(`El área de firma del firmante #${idxFirmante + 1} tiene "${campo}" inválido.`);
+    }
+    return n;
+  };
+  const page = numero(area.page, 'page');
+  const positionX = numero(area.positionX, 'positionX');
+  const positionY = numero(area.positionY, 'positionY');
+  const width = numero(area.width, 'width');
+  const height = numero(area.height, 'height');
+  if (!Number.isInteger(page) || page < 1) {
+    throw badRequest(`El área de firma del firmante #${idxFirmante + 1} tiene una página inválida.`);
+  }
+  for (const [campo, valor] of [['positionX', positionX], ['positionY', positionY], ['width', width], ['height', height]]) {
+    if (valor < 0 || valor > 100) {
+      throw badRequest(`El área de firma del firmante #${idxFirmante + 1} tiene "${campo}" fuera de rango (0-100).`);
+    }
+  }
+  return {
+    page,
+    // Se recorta para que el recuadro nunca se salga de la página, por si el navegador del
+    // usuario mandó un recuadro pegado a una orilla (Documenso no lo valida de su lado).
+    positionX: Math.min(positionX, 100 - width),
+    positionY: Math.min(positionY, 100 - height),
+    width,
+    height,
+  };
+}
+
 async function cargarContrato(id) {
   const { rows } = await query('SELECT * FROM contratos WHERE id = $1', [id]);
   return rows[0] || null;
@@ -982,6 +1023,39 @@ router.post(
 // Firma electrónica (Documenso — self-hosted; ver backend/src/documensoClient.js)
 // ---------------------------------------------------------------------------
 
+// GET /api/contratos/:id/documentos/:documentoId/pdf-para-firma
+// Bytes crudos (application/pdf) de la versión VIGENTE del documento, usados por el editor
+// visual de EnviarAFirmarModal.jsx (pdfjs-dist) para dibujar el PDF y que el usuario arrastre el
+// recuadro de firma. Se sirve por este endpoint autenticado (en vez del <a href={doc.url}> normal
+// de "Ver") porque doc.url no siempre es descargable sin sesión propia del navegador (p. ej. un
+// documento en SharePoint requiere el login de Microsoft del usuario) — aquí se usa
+// storageContratos.obtenerBuffer(), que ya sabe leer de cualquier backend de almacenamiento.
+router.get(
+  '/:id/documentos/:documentoId/pdf-para-firma',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const contrato = await cargarContrato(req.params.id);
+    if (!contrato) throw notFound('Contrato no encontrado.');
+
+    const esDueño = contrato.solicitado_por_id === req.usuario.id;
+    if (!esRolPrivilegiado(req.usuario.rol) && !esDueño) {
+      throw forbidden('No puedes ver este documento para enviarlo a firma.');
+    }
+
+    const { rows } = await query(
+      `SELECT * FROM contrato_documentos WHERE id = $1 AND contrato_id = $2 AND es_version_actual = true`,
+      [req.params.documentoId, contrato.id]
+    );
+    const documento = rows[0];
+    if (!documento) throw notFound('Documento no encontrado (o ya no es la versión vigente).');
+
+    const buffer = await storageContratos.obtenerBuffer(documento.ruta_archivo);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(buffer);
+  })
+);
+
 // POST /api/contratos/:id/documentos/:documentoId/enviar-a-firmar
 // Manda la versión VIGENTE del documento indicado a firma electrónica vía Documenso (instancia
 // propia, self-hosted). Firmantes 100% capturados a mano en cada envío (no requieren cuenta
@@ -1024,6 +1098,9 @@ router.post(
           nombreCompleto: String(f.nombreCompleto).trim(),
           email: String(f.email).trim(),
           orden: Number.isFinite(Number(f.orden)) ? Number(f.orden) : idx + 1,
+          // Recuadro que el usuario arrastró sobre el PDF en el editor visual (opcional: si no
+          // viene, documensoClient usa la posición automática de siempre, ver areaPorDefecto).
+          area: validarArea(f.area, idx),
         };
     });
     const ordenada = Boolean(body.ordenada);
