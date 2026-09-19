@@ -19,6 +19,7 @@ const jobsRoutes = require('./routes/jobs');
 const clubesRoutes = require('./routes/clubes');
 const franquiciasRoutes = require('./routes/franquicias');
 const documensoWebhookRoutes = require('./routes/documensoWebhook');
+const keepAliveRoutes = require('./routes/keepAlive');
 const { iniciarProgramador } = require('./jobs/scheduler');
 
 const app = express();
@@ -53,6 +54,9 @@ app.use('/api/franquicias', franquiciasRoutes);
 // Público (sin requireAuth): lo llama la instancia de Documenso, no un usuario de la app. Ver
 // src/routes/documensoWebhook.js para el modelo de seguridad (secreto compartido opcional).
 app.use('/api/webhooks/documenso', documensoWebhookRoutes);
+// Público (sin requireAuth): lo llama un cron externo gratuito para mantener despiertos
+// este backend y Documenso mientras haya firmas pendientes. Ver src/routes/keepAlive.js.
+app.use('/api/keep-alive', keepAliveRoutes);
 
 // 404
 app.use((req, res) => {
