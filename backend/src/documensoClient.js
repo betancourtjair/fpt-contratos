@@ -231,30 +231,36 @@ async function cancelarSubmission(submissionId, motivo) {
 }
 
 /**
- * Descarga el PDF (firmado o no, según su estatus actual) en bytes.
- * Nota: la documentación pública de Documenso sobre el API de "envelopes" está fragmentada
- * (ver github.com/documenso/documenso/issues/2817) y no deja 100% claro el nombre exacto del
- * campo con la URL de descarga dentro de GET /envelope/:id. Se prueban los nombres más
- * probables; si al probarlo en vivo Documenso regresa otro nombre de campo, es aquí donde hay
- * que ajustarlo.
+ * Descarga el PDF ya firmado (con firmas y bitácora de auditoría insertadas) en bytes.
+ *
+ * *** CORREGIDO tras probar en vivo (sep 2026) ***
+ * La primera versión de esta función asumía, según los ejemplos fragmentados de la
+ * documentación pública (ver github.com/documenso/documenso/issues/2817), que GET /envelope/:id
+ * traía una URL de descarga en algún campo del JSON (se probaban varios nombres candidatos). En
+ * la práctica, un envelope COMPLETED no trae ninguna URL: solo trae, dentro de envelopeItems[],
+ * el id de cada "item" (el PDF adjunto al envelope) — la descarga real es un endpoint APARTE que
+ * regresa los BYTES del PDF directamente (Content-Type: application/pdf, no JSON). Confirmado
+ * leyendo el código fuente de Documenso (self-hosted, AGPL-3.0):
+ * packages/trpc/server/envelope-router/download-envelope-item.types.ts documenta
+ * GET /envelope/item/:envelopeItemId/download?version=signed|original|pending (la
+ * implementación real vive en su servidor Hono/Remix — el procedimiento de tRPC solo declara el
+ * contrato para la API pública v2 y truena "NOT_IMPLEMENTED" si se llama por tRPC directo).
  */
 async function descargarDocumento(submissionId) {
     const data = await consultarSubmission(submissionId);
-    const candidatos = [
-          data?.envelopeItems?.[0]?.documentData?.url,
-          data?.documents?.[0]?.url,
-          data?.downloadUrl,
-        ];
-    const url = candidatos.find(Boolean);
-    if (!url) {
+    const envelopeItemId = data?.envelopeItems?.[0]?.id;
+    if (!envelopeItemId) {
           throw new Error(
-                  `No se encontró una URL de descarga en la respuesta de Documenso para el envelope ${submissionId}. ` +
+                  `El envelope ${submissionId} no trae ningún envelopeItem del que descargar el PDF. ` +
                     `Respuesta: ${JSON.stringify(data)}`
                 );
     }
-    const resp = await fetch(url);
+    const resp = await fetch(`${baseUrl()}/api/v2/envelope/item/${envelopeItemId}/download?version=signed`, {
+          headers: { Authorization: process.env.DOCUMENSO_API_TOKEN },
+    });
     if (!resp.ok) {
-          throw new Error(`No se pudo descargar el documento de Documenso (${resp.status}).`);
+          const detalle = await resp.text().catch(() => '');
+          throw new Error(`No se pudo descargar el documento de Documenso (${resp.status}): ${detalle}`);
     }
     return Buffer.from(await resp.arrayBuffer());
 }
