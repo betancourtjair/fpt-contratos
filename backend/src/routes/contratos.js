@@ -1463,7 +1463,17 @@ router.get(
       throw badRequest('Este documento no se ha mandado a firmar.');
     }
 
-    await firmaElectronica.revisarEstatusDocumento(documento);
+    // Si ya está firmado o ya se marcó rechazado/cancelado no hace falta volver a consultar
+    // Documenso. Si no, usamos la variante "estricta" (a diferencia del job periódico) para que
+    // un fallo real al consultar Documenso se vea como error en la pantalla en vez de que el
+    // botón simplemente "se reinicie" sin explicación y sin cambiar el estatus.
+    if (!documento.documenso_firmado_en && !documento.documenso_rechazado_en) {
+      try {
+        await firmaElectronica.revisarEstatusDocumentoEstricto(documento);
+      } catch (err) {
+        throw badRequest(`No se pudo consultar el estatus en Documenso: ${err.message}`);
+      }
+    }
 
     const { rows: actualizadoRows } = await query('SELECT * FROM contrato_documentos WHERE id = $1', [documento.id]);
     const actualizado = actualizadoRows[0];

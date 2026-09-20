@@ -153,9 +153,47 @@ async function procesarDocumentoRechazado(documentoDb, estatusCrudo) {
 }
 
 /**
- * Consulta el estatus actual en Documenso de un documento ya enviado a firmar y actúa en
- * consecuencia (guarda el estatus crudo; si ya quedó firmado, descarga y versiona; si fue
- * rechazado o cancelado, lo marca). Nunca truena el llamador — todo error queda en consola.
+ * Núcleo de la revisión de estatus: consulta Documenso y actúa en consecuencia (guarda el
+ * estatus crudo; si ya quedó firmado, descarga y versiona; si fue rechazado o cancelado, lo
+ * marca). A diferencia de revisarEstatusDocumento, ESTA función SÍ deja pasar cualquier error
+ * (red, token inválido, id de envelope no encontrado, etc.) — la usa el endpoint manual
+ * ("Verificar estatus" en el frontend, ver GET .../estatus-firma) para que un fallo real se vea
+ * como error en vez de quedarse "colgado" en silencio mostrando siempre el mismo estatus viejo.
+ *
+ * También deja un log con las llaves que trajo la respuesta de Documenso — la documentación
+ * pública de su API de envelopes está fragmentada (mismo problema ya documentado en
+ * descargarDocumento) y esto es lo más rápido para confirmar en Render el nombre real del campo
+ * si algún día "status" cambia o no es el esperado.
+ * @returns {Promise<'firmado'|'rechazado'|'en_proceso'>}
+ */
+async function revisarEstatusDocumentoEstricto(documentoDb) {
+  const submission = await documenso.consultarSubmission(documentoDb.documenso_submission_id);
+  const estatusCrudo = submission?.status || 'PENDING';
+  const interpretado = interpretarEstatus(estatusCrudo);
+
+  console.log(
+    `[firmaElectronica] Documento ${documentoDb.id} (envelope ${documentoDb.documenso_submission_id}): ` +
+      `Documenso status="${submission?.status}" -> interpretado "${interpretado}". ` +
+      `Llaves de la respuesta: ${Object.keys(submission || {}).join(', ') || '(respuesta vacía)'}`
+  );
+
+  await query(`UPDATE contrato_documentos SET documenso_estatus = $1, documenso_actualizado_at = now() WHERE id = $2`, [
+    estatusCrudo,
+    documentoDb.id,
+  ]);
+
+  if (interpretado === 'firmado') {
+    await procesarDocumentoFirmado(documentoDb, estatusCrudo);
+  } else if (interpretado === 'rechazado') {
+    await procesarDocumentoRechazado(documentoDb, estatusCrudo);
+  }
+  return interpretado;
+}
+
+/**
+ * Igual que revisarEstatusDocumentoEstricto, pero nunca truena el llamador — todo error queda en
+ * consola. La usa el job periódico (revisarPendientes), donde un solo documento con problemas no
+ * debe detener la revisión de los demás.
  * @returns {Promise<'firmado'|'rechazado'|'en_proceso'|null>}
  */
 async function revisarEstatusDocumento(documentoDb) {
@@ -164,21 +202,7 @@ async function revisarEstatusDocumento(documentoDb) {
     return documentoDb.documenso_firmado_en ? 'firmado' : 'rechazado';
   }
   try {
-    const submission = await documenso.consultarSubmission(documentoDb.documenso_submission_id);
-    const estatusCrudo = submission?.status || 'PENDING';
-    const interpretado = interpretarEstatus(estatusCrudo);
-
-    await query(`UPDATE contrato_documentos SET documenso_estatus = $1, documenso_actualizado_at = now() WHERE id = $2`, [
-      estatusCrudo,
-      documentoDb.id,
-    ]);
-
-    if (interpretado === 'firmado') {
-      await procesarDocumentoFirmado(documentoDb, estatusCrudo);
-    } else if (interpretado === 'rechazado') {
-      await procesarDocumentoRechazado(documentoDb, estatusCrudo);
-    }
-    return interpretado;
+    return await revisarEstatusDocumentoEstricto(documentoDb);
   } catch (err) {
     console.error(`[firmaElectronica] Error revisando estatus del documento ${documentoDb.id}:`, err.message);
     return null;
@@ -205,6 +229,7 @@ module.exports = {
   marcarEnviado,
   buscarPorSubmissionId,
   revisarEstatusDocumento,
+  revisarEstatusDocumentoEstricto,
   revisarPendientes,
   interpretarEstatus,
   cancelarEnvio,
