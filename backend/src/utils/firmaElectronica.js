@@ -46,6 +46,31 @@ async function buscarPorSubmissionId(submissionId) {
 }
 
 /**
+ * Cancela en Documenso el envío a firma de un documento (botón "Cancelar" en el frontend,
+ * mientras sigue "En firma") y lo deja localmente en el mismo estado que usa el sistema cuando
+ * Documenso reporta REJECTED/CANCELLED por su cuenta (ver interpretarEstatus / procesarDocumentoRechazado):
+ * documenso_rechazado_en queda con la fecha, lo que además libera el botón "Enviar a firmar" para
+ * volver a mandarlo (ver el checkeo en POST /:id/documentos/:documentoId/enviar-a-firmar). Se guarda
+ * el estatus crudo como 'CANCELLED' (en vez de 'REJECTED') para que el frontend pueda distinguir
+ * "lo cancelamos nosotros" de "lo rechazó el firmante".
+ */
+async function cancelarEnvio(documentoDb, { motivo } = {}) {
+  await documenso.cancelarSubmission(documentoDb.documenso_submission_id, motivo);
+
+  await query(
+    `UPDATE contrato_documentos
+     SET documenso_estatus = 'CANCELLED',
+         documenso_rechazado_en = now(),
+         documenso_actualizado_at = now()
+     WHERE id = $1`,
+    [documentoDb.id]
+  );
+  // El registro de auditoría lo hace el llamador (ver POST .../cancelar-firma en routes/contratos.js),
+  // igual que marcarEnviado — a diferencia de procesarDocumentoRechazado, que sí audita aquí porque
+  // ese caso lo dispara el job periódico o el webhook, sin una petición HTTP de por medio.
+}
+
+/**
  * Descarga el PDF ya firmado y lo agrega al expediente como una NUEVA VERSIÓN (categoría
  * version_firmada, origen 'documenso') del mismo documento que se mandó a firmar.
  */
@@ -182,4 +207,5 @@ module.exports = {
   revisarEstatusDocumento,
   revisarPendientes,
   interpretarEstatus,
+  cancelarEnvio,
 };

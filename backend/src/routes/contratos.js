@@ -1475,4 +1475,53 @@ router.get(
   })
 );
 
+// POST /api/contratos/:id/documentos/:documentoId/cancelar-firma - cancela en Documenso un envío
+// a firma que sigue en proceso ("En firma" en el frontend). No aplica si ya quedó firmado, o si
+// ya estaba rechazado/cancelado antes (en ese caso ya se puede volver a mandar directamente).
+router.post(
+  '/:id/documentos/:documentoId/cancelar-firma',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const contrato = await cargarContrato(req.params.id);
+    if (!contrato) throw notFound('Contrato no encontrado.');
+
+    const esDueño = contrato.solicitado_por_id === req.usuario.id;
+    if (!esRolPrivilegiado(req.usuario.rol) && !esDueño) {
+      throw forbidden('No puedes cancelar la firma de un documento de un contrato que no solicitaste.');
+    }
+    if (!documenso.configurado()) {
+      throw badRequest('La integración con Documenso no está configurada (faltan DOCUMENSO_URL / DOCUMENSO_API_TOKEN).');
+    }
+
+    const { rows } = await query(
+      `SELECT * FROM contrato_documentos WHERE id = $1 AND contrato_id = $2`,
+      [req.params.documentoId, contrato.id]
+    );
+    const documento = rows[0];
+    if (!documento) throw notFound('Documento no encontrado.');
+    if (!documento.documenso_submission_id) {
+      throw badRequest('Este documento no se ha mandado a firmar.');
+    }
+    if (documento.documenso_firmado_en) {
+      throw conflict('Este documento ya quedó firmado; no se puede cancelar.');
+    }
+    if (documento.documenso_rechazado_en) {
+      throw conflict('El envío a firma de este documento ya estaba cancelado o rechazado.');
+    }
+
+    await firmaElectronica.cancelarEnvio(documento, {
+      motivo: (req.body || {}).motivo,
+    });
+
+    await registrarAuditoria({
+      contratoId: contrato.id,
+      usuarioId: req.usuario.id,
+      accion: 'documento_firma_cancelada',
+      detalle: `Envío a firma de "${documento.nombre_archivo}" cancelado por el usuario.`,
+    });
+
+    res.json({ ok: true });
+  })
+);
+
 module.exports = router;

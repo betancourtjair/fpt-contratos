@@ -215,6 +215,22 @@ async function consultarSubmission(submissionId) {
 }
 
 /**
+ * Cancela un envelope que sigue en proceso (estatus DRAFT o PENDING) — por ejemplo, si se mandó
+ * por error o ya no se necesita la firma. A diferencia de "rechazar" (que dispara el propio
+ * firmante desde su pantalla de firma), esto lo dispara un usuario interno de esta app desde el
+ * expediente del contrato. Confirmado en el código fuente de Documenso (self-hosted, AGPL-3.0):
+ * packages/trpc/server/envelope-router/cancel-envelope.types.ts expone esta mutación en la API
+ * pública como POST /envelope/cancel, con body { envelopeId, reason? } (el motivo es opcional).
+ * Documenso deja el envelope con estatus CANCELLED (visible en su propio historial) en vez de
+ * borrarlo — no existe una operación de "delete" real vía este cliente porque no la usa la app.
+ */
+async function cancelarSubmission(submissionId, motivo) {
+    return llamar('POST', '/api/v2/envelope/cancel', {
+          body: { envelopeId: submissionId, reason: motivo || undefined },
+    });
+}
+
+/**
  * Descarga el PDF (firmado o no, según su estatus actual) en bytes.
  * Nota: la documentación pública de Documenso sobre el API de "envelopes" está fragmentada
  * (ver github.com/documenso/documenso/issues/2817) y no deja 100% claro el nombre exacto del
@@ -248,4 +264,5 @@ module.exports = {
     crearSubmission,
     consultarSubmission,
     descargarDocumento,
+    cancelarSubmission,
 };

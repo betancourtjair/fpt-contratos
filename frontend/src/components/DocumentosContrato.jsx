@@ -19,15 +19,23 @@ function categoriaLabel(valor) {
 // mandó a firmar (mientras sigue siendo la versión vigente); una vez firmado, la versión
 // vigente pasa a ser el PDF firmado que se agregó automáticamente al expediente (ver tag
 // "Firmado en Documenso" más abajo).
-function FirmaEstado({ doc, verificando, onVerificar }) {
+function FirmaEstado({ doc, verificando, onVerificar, cancelando, onCancelar }) {
   if (!doc.documensoSubmissionId) return null;
   if (doc.documensoFirmadoEn) return <span className="tag-pill">Firmado</span>;
-  if (doc.documensoRechazadoEn) return <span className="tag-pill">Firma rechazada</span>;
+  if (doc.documensoRechazadoEn) {
+    // 'CANCELLED' es el estatus crudo que se guarda cuando el usuario lo cancela desde aquí (ver
+    // FirmaEstado "Cancelar" abajo); cualquier otro valor llegó porque el propio firmante lo
+    // rechazó desde su pantalla de firma en Documenso.
+    return <span className="tag-pill">{doc.documensoEstatus === 'CANCELLED' ? 'Firma cancelada' : 'Firma rechazada'}</span>;
+  }
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
       <span className="tag-pill" title={doc.documensoEstatus || ''}>En firma</span>
-      <button type="button" className="icon-btn" onClick={() => onVerificar(doc)} disabled={verificando}>
+      <button type="button" className="icon-btn" onClick={() => onVerificar(doc)} disabled={verificando || cancelando}>
         {verificando ? 'Verificando…' : 'Verificar estatus'}
+      </button>
+      <button type="button" className="icon-btn" onClick={() => onCancelar(doc)} disabled={verificando || cancelando}>
+        {cancelando ? 'Cancelando…' : 'Cancelar'}
       </button>
     </span>
   );
@@ -75,6 +83,7 @@ export default function DocumentosContrato({
 
   const [docParaFirmar, setDocParaFirmar] = useState(null); // documento sobre el que se abrió el modal "Enviar a firmar"
   const [verificandoFirma, setVerificandoFirma] = useState({}); // documentoId -> bool
+  const [cancelandoFirma, setCancelandoFirma] = useState({}); // documentoId -> bool
 
   async function verificarEstatusFirma(doc) {
     setVerificandoFirma((v) => ({ ...v, [doc.id]: true }));
@@ -85,6 +94,23 @@ export default function DocumentosContrato({
       setError(err.message || 'No se pudo verificar el estatus de la firma.');
     } finally {
       setVerificandoFirma((v) => ({ ...v, [doc.id]: false }));
+    }
+  }
+
+  async function cancelarFirma(doc) {
+    const confirmado = window.confirm(
+      `¿Cancelar el envío a firma de "${doc.nombreArchivo}"? El firmante ya no podrá firmarlo desde el enlace que recibió, y podrás volver a mandarlo a firmar después si hace falta.`
+    );
+    if (!confirmado) return;
+    const motivo = window.prompt('Motivo de la cancelación (opcional):', '') || undefined;
+    setCancelandoFirma((c) => ({ ...c, [doc.id]: true }));
+    try {
+      await api.post(`/contratos/${contratoId}/documentos/${doc.id}/cancelar-firma`, { motivo });
+      onSubido?.();
+    } catch (err) {
+      setError(err.message || 'No se pudo cancelar el envío a firma.');
+    } finally {
+      setCancelandoFirma((c) => ({ ...c, [doc.id]: false }));
     }
   }
 
@@ -180,6 +206,8 @@ export default function DocumentosContrato({
                             doc={doc}
                             verificando={!!verificandoFirma[doc.id]}
                             onVerificar={verificarEstatusFirma}
+                            cancelando={!!cancelandoFirma[doc.id]}
+                            onCancelar={cancelarFirma}
                           />
                         ) : (
                           <button type="button" className="icon-btn" onClick={() => setDocParaFirmar(doc)}>
