@@ -4,11 +4,12 @@ import { api, unwrap } from '../../api.js';
 import { useAuth } from '../../auth/AuthContext.jsx';
 import Spinner from '../../components/Spinner.jsx';
 import EstatusBadge from '../../components/EstatusBadge.jsx';
+import FirmaContratoBadge from '../../components/FirmaContratoBadge.jsx';
 import ContratoForm, { validarContrato, franquiciaPayload } from '../../components/ContratoForm.jsx';
 import { rutaListaParaEstatus } from './ListaContratos.jsx';
 import AutorizacionTimeline from '../../components/AutorizacionTimeline.jsx';
 import DocumentosContrato from '../../components/DocumentosContrato.jsx';
-import { formatMonto, formatFecha } from '../../utils.js';
+import { formatMonto, formatFecha, formatFechaHora } from '../../utils.js';
 
 function normalizarDecision(aprobacion) {
   const d = (aprobacion.decision || '').toLowerCase();
@@ -19,6 +20,13 @@ function normalizarDecision(aprobacion) {
 function fecha10(v) {
   return v ? String(v).substring(0, 10) : '';
 }
+
+// Mismos bloques de estatus que ListaContratos.jsx (VISTAS.solicitudes / VISTAS.vigentes):
+// una solicitud (borrador/en_revision/en_autorizacion) se cancela distinto a un contrato ya
+// vigente/activo (autorizado/activo/por_vencer) — ver POST .../cancelar-solicitud y
+// .../cancelar-contrato en el backend.
+const ESTATUS_SOLICITUD = ['borrador', 'en_revision', 'en_autorizacion'];
+const ESTATUS_VIGENTE = ['autorizado', 'activo', 'por_vencer'];
 
 function contratoAValores(c, fd) {
   fd = fd || {};
@@ -88,6 +96,11 @@ export default function DetalleContrato() {
   const [generandoDocumento, setGenerandoDocumento] = useState(false);
   const [errorGenerarDocumento, setErrorGenerarDocumento] = useState('');
 
+  const [cancelandoSolicitud, setCancelandoSolicitud] = useState(false);
+  const [mostrarCancelarContrato, setMostrarCancelarContrato] = useState(false);
+  const [motivoCancelacion, setMotivoCancelacion] = useState('');
+  const [cancelandoContrato, setCancelandoContrato] = useState(false);
+
   const cargar = useCallback(async () => {
     setCargando(true);
     setError('');
@@ -140,6 +153,9 @@ export default function DetalleContrato() {
   const esSolicitante = usuario && solicitanteId && String(solicitanteId) === String(usuario.id);
   const puedeEnviar = isBorrador && (esSolicitante || esAdmin);
   const puedeEditar = isBorrador && (esSolicitante || esAdmin);
+  const puedeCancelarSolicitud = ESTATUS_SOLICITUD.includes(contrato?.estatus) && (esSolicitante || esAdmin);
+  const puedeCancelarContrato = ESTATUS_VIGENTE.includes(contrato?.estatus) && usuario?.rol === 'juridico';
+  const esVigente = ESTATUS_VIGENTE.includes(contrato?.estatus);
 
   const pasoActual = useMemo(() => {
     const ordenadas = [...aprobaciones].sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
@@ -239,6 +255,45 @@ export default function DetalleContrato() {
     }
   }
 
+  async function handleCancelarSolicitud() {
+    const confirmado = window.confirm(
+      `¿Cancelar la solicitud "${contrato.folio} - ${contrato.titulo}"? Ya no se podrá continuar su autorización.`
+    );
+    if (!confirmado) return;
+    const motivo = window.prompt('Motivo de la cancelación (opcional):', '') || undefined;
+    setAccionMsg('');
+    setAccionErr('');
+    setCancelandoSolicitud(true);
+    try {
+      await api.post(`/contratos/${id}/cancelar-solicitud`, { motivo });
+      setAccionMsg('La solicitud fue cancelada.');
+      await cargar();
+    } catch (err) {
+      setAccionErr(err.message || 'No se pudo cancelar la solicitud.');
+    } finally {
+      setCancelandoSolicitud(false);
+    }
+  }
+
+  async function handleCancelarContrato(e) {
+    e.preventDefault();
+    if (!motivoCancelacion.trim()) return;
+    setAccionMsg('');
+    setAccionErr('');
+    setCancelandoContrato(true);
+    try {
+      await api.post(`/contratos/${id}/cancelar-contrato`, { motivo: motivoCancelacion.trim() });
+      setAccionMsg('El contrato fue cancelado.');
+      setMostrarCancelarContrato(false);
+      setMotivoCancelacion('');
+      await cargar();
+    } catch (err) {
+      setAccionErr(err.message || 'No se pudo cancelar el contrato.');
+    } finally {
+      setCancelandoContrato(false);
+    }
+  }
+
   if (cargando) return <Spinner label="Cargando expediente…" />;
   if (error) return <div className="alert alert-error">{error}</div>;
   if (!contrato) return null;
@@ -256,9 +311,20 @@ export default function DetalleContrato() {
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <EstatusBadge estatus={contrato.estatus} />
+          {esVigente && <FirmaContratoBadge firmado={contrato.firmado} />}
           {puedeEnviar && (
             <button className="btn btn-primary" onClick={handleEnviarAutorizacion} disabled={enviandoAutorizacion}>
               {enviandoAutorizacion ? 'Enviando…' : 'Enviar a autorización'}
+            </button>
+          )}
+          {puedeCancelarSolicitud && (
+            <button className="btn btn-danger" onClick={handleCancelarSolicitud} disabled={cancelandoSolicitud}>
+              {cancelandoSolicitud ? 'Cancelando…' : 'Cancelar solicitud'}
+            </button>
+          )}
+          {puedeCancelarContrato && !mostrarCancelarContrato && (
+            <button className="btn btn-danger" onClick={() => setMostrarCancelarContrato(true)}>
+              Cancelar contrato
             </button>
           )}
           <button className="btn btn-secondary" onClick={() => navigate(rutaListaParaEstatus(contrato.estatus))}>Volver al listado</button>
@@ -267,6 +333,52 @@ export default function DetalleContrato() {
 
       {accionMsg && <div className="alert alert-success">{accionMsg}</div>}
       {accionErr && <div className="alert alert-error">{accionErr}</div>}
+
+      {mostrarCancelarContrato && (
+        <div className="card" style={{ borderColor: 'var(--color-danger, #c0392b)' }}>
+          <div className="card-title">Cancelar este contrato vigente</div>
+          <p className="muted" style={{ fontSize: 13, marginTop: -8 }}>
+            Esta acción es solo para jurídico y no se puede deshacer. El motivo queda guardado en el
+            expediente del contrato.
+          </p>
+          <form onSubmit={handleCancelarContrato}>
+            <div className="field">
+              <label htmlFor="motivo-cancelacion">Motivo de la cancelación *</label>
+              <textarea
+                id="motivo-cancelacion"
+                value={motivoCancelacion}
+                onChange={(e) => setMotivoCancelacion(e.target.value)}
+                placeholder="Explica por qué se cancela este contrato…"
+                required
+              />
+            </div>
+            <div className="form-actions">
+              <button
+                type="submit"
+                className="btn btn-danger"
+                disabled={cancelandoContrato || !motivoCancelacion.trim()}
+              >
+                {cancelandoContrato ? 'Cancelando…' : 'Confirmar cancelación'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => { setMostrarCancelarContrato(false); setMotivoCancelacion(''); }}
+                disabled={cancelandoContrato}
+              >
+                Cerrar
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {contrato.estatus === 'cancelado' && contrato.motivoCancelacion && (
+        <div className="alert alert-error">
+          <strong>Cancelado{contrato.canceladoEn ? ` el ${formatFechaHora(contrato.canceladoEn)}` : ''}.</strong>{' '}
+          Motivo: {contrato.motivoCancelacion}
+        </div>
+      )}
 
       <div className="grid-2">
         <div>

@@ -2,7 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const { query } = require('../db');
 const asyncHandler = require('../utils/asyncHandler');
-const { badRequest, notFound, traducirErrorPostgres } = require('../utils/errors');
+const { badRequest, notFound, conflict, traducirErrorPostgres } = require('../utils/errors');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { registrarAuditoria } = require('../utils/audit');
 const storage = require('../storage');
@@ -90,6 +90,43 @@ router.patch(
       if (!rows[0]) throw notFound('Tipo de contrato no encontrado.');
       res.json({ tipoContrato: rows[0] });
     } catch (err) {
+      const traducido = traducirErrorPostgres(err);
+      if (traducido) throw traducido;
+      throw err;
+    }
+  })
+);
+
+// DELETE /api/tipos-contrato/:id (admin+) - borra por completo un tipo de contrato del catálogo
+// (a diferencia de PATCH { activo: false }, que solo lo desactiva y lo conserva). Postgres mismo
+// protege la integridad: tipos_contrato tiene FKs entrantes desde contratos.tipo_contrato_id y
+// flujo_plantillas.tipo_contrato_id SIN "ON DELETE CASCADE" (ver migration.sql), así que si algún
+// contrato o plantilla de flujo todavía usa este tipo, el DELETE truena con 23503
+// (foreign_key_violation) y aquí se traduce a un mensaje claro en vez del genérico de
+// traducirErrorPostgres. Su plantilla Word (plantillas_tipo_contrato), en cambio, sí tiene
+// ON DELETE CASCADE y se borra sola.
+router.delete(
+  '/:id',
+  requireAuth,
+  requireRole('super_admin', 'admin'),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    try {
+      const { rows } = await query('DELETE FROM tipos_contrato WHERE id = $1 RETURNING *', [id]);
+      if (!rows[0]) throw notFound('Tipo de contrato no encontrado.');
+      await registrarAuditoria({
+        usuarioId: req.usuario.id,
+        accion: 'tipo_contrato_eliminado',
+        detalle: `Tipo de contrato "${rows[0].nombre}" eliminado del catálogo.`,
+      });
+      res.status(204).send();
+    } catch (err) {
+      if (err.code === '23503') {
+        throw conflict(
+          'No se puede borrar: todavía hay contratos (o un flujo de autorización) que usan este tipo. ' +
+            'Desactívalo en vez de borrarlo si ya no quieres que aparezca en solicitudes nuevas.'
+        );
+      }
       const traducido = traducirErrorPostgres(err);
       if (traducido) throw traducido;
       throw err;

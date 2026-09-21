@@ -114,6 +114,19 @@ export default function TiposContrato() {
     }
   }
 
+  async function borrar(tipo) {
+    const confirmado = window.confirm(
+      `¿Borrar por completo el tipo de contrato "${tipo.nombre}"? Si ya hay contratos usándolo, no se podrá — en ese caso, desactívalo en vez de borrarlo.`
+    );
+    if (!confirmado) return;
+    try {
+      await api.del(`/tipos-contrato/${tipo.id}`);
+      await cargar();
+    } catch (err) {
+      setError(err.message || 'No se pudo borrar el tipo de contrato.');
+    }
+  }
+
   async function subirPlantilla() {
     if (!archivoPlantilla) {
       setErrorPlantilla('Selecciona un archivo Word (.docx) primero.');
@@ -358,6 +371,7 @@ export default function TiposContrato() {
                       <button className="icon-btn" onClick={() => toggleActivo(t)}>
                         {t.activo !== false ? 'Desactivar' : 'Activar'}
                       </button>
+                      <button className="icon-btn" onClick={() => borrar(t)}>Borrar</button>
                     </td>
                   </tr>
                 ))

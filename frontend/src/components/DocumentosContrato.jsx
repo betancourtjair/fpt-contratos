@@ -1,5 +1,6 @@
 import { Fragment, useState } from 'react';
 import { api, API_URL, unwrap } from '../api.js';
+import { useAuth } from '../auth/AuthContext.jsx';
 import { formatFechaHora } from '../utils.js';
 import EnviarAFirmarModal from './EnviarAFirmarModal.jsx';
 
@@ -9,6 +10,9 @@ const CATEGORIAS = [
   { value: 'anexo', label: 'Anexo' },
   { value: 'evidencia', label: 'Evidencia' },
   { value: 'otro', label: 'Otro' },
+  // Solo la ve/puede elegirla jurídico (ver filtro más abajo y el checkeo en el backend,
+  // POST /:id/documentos): contratos con firma física, no vía Documenso.
+  { value: 'firmado_manual', label: 'Documento firmado manual' },
 ];
 
 function categoriaLabel(valor) {
@@ -75,6 +79,10 @@ export default function DocumentosContrato({
     contraparteNombre,
     contraparteEmail,
 }) {
+  const { usuario } = useAuth();
+  const esJuridico = usuario?.rol === 'juridico';
+  const categoriasDisponibles = CATEGORIAS.filter((c) => c.value !== 'firmado_manual' || esJuridico);
+
   const [archivo, setArchivo] = useState(null);
   const [categoria, setCategoria] = useState(CATEGORIAS[0].value);
   const [grupoDestino, setGrupoDestino] = useState('');
@@ -275,7 +283,7 @@ export default function DocumentosContrato({
         <div className="field" style={{ marginBottom: 0 }}>
           <label htmlFor="doc-categoria">Categoría</label>
           <select id="doc-categoria" value={categoria} onChange={(e) => setCategoria(e.target.value)}>
-            {CATEGORIAS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+            {categoriasDisponibles.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
           </select>
         </div>
         {documentos.length > 0 && (

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { api, unwrap } from '../../api.js';
 import Spinner from '../../components/Spinner.jsx';
 import EstatusBadge, { estatusLabel } from '../../components/EstatusBadge.jsx';
+import FirmaContratoBadge from '../../components/FirmaContratoBadge.jsx';
 import { formatMonto, formatFecha } from '../../utils.js';
 
 // Cada "vista" agrupa los contratos por bloque de estatus, según la organización acordada:
@@ -160,12 +161,13 @@ export default function ListaContratos({ vista = 'solicitudes' }) {
                 <th>Monto</th>
                 <th>Vencimiento</th>
                 <th>Estatus</th>
+                {vista === 'vigentes' && <th>Firma</th>}
               </tr>
             </thead>
             <tbody>
               {contratos.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="table-empty">{config.vacioTexto}</td>
+                  <td colSpan={vista === 'vigentes' ? 9 : 8} className="table-empty">{config.vacioTexto}</td>
                 </tr>
               ) : (
                 contratos.map((c) => (
@@ -178,6 +180,7 @@ export default function ListaContratos({ vista = 'solicitudes' }) {
                     <td>{formatMonto(c.monto, c.moneda)}</td>
                     <td>{formatFecha(c.fechaFin)}</td>
                     <td><EstatusBadge estatus={c.estatus} /></td>
+                    {vista === 'vigentes' && <td><FirmaContratoBadge firmado={c.firmado} /></td>}
                   </tr>
                 ))
               )}

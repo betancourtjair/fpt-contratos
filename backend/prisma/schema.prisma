@@ -44,6 +44,7 @@ enum CategoriaDocumento {
   anexo
   evidencia
   otro
+  firmado_manual // contrato con firma física, adjuntado a mano — solo lo puede subir jurídico
 }
 
 model Usuario {
@@ -58,6 +59,7 @@ model Usuario {
   updatedAt     DateTime @updatedAt
 
   contratosSolicitados Contrato[]            @relation("SolicitadoPor")
+  contratosCancelados  Contrato[]            @relation("CanceladoPor")
   aprobaciones         ContratoAprobacion[]   @relation("Aprobador")
   documentosSubidos    ContratoDocumento[]    @relation("SubidoPor")
   documentosEnviadosAFirma ContratoDocumento[] @relation("DocumensoEnviadoPor")
@@ -141,12 +143,21 @@ model Contrato {
   plantillaFlujoId       String?
   pasoActualOrden        Int?
 
+  // Cancelación (de una solicitud por quien la levantó, o de un contrato vigente/activo por
+  // jurídico — ver POST .../cancelar-solicitud y .../cancelar-contrato). Ambos casos dejan
+  // estatus = 'cancelado'; estas columnas son las que permiten distinguir quién/cuándo/por qué,
+  // ya que el enum por sí solo no lo dice.
+  canceladoEn            DateTime?
+  canceladoPorId         String?
+  motivoCancelacion      String?
+
   createdAt              DateTime          @default(now())
   updatedAt              DateTime          @updatedAt
 
   tipoContrato   TipoContrato     @relation(fields: [tipoContratoId], references: [id])
   solicitadoPor  Usuario          @relation("SolicitadoPor", fields: [solicitadoPorId], references: [id])
   plantillaFlujo FlujoPlantilla?  @relation(fields: [plantillaFlujoId], references: [id])
+  canceladoPor   Usuario?         @relation("CanceladoPor", fields: [canceladoPorId], references: [id])
 
   aprobaciones ContratoAprobacion[]
   documentos   ContratoDocumento[]

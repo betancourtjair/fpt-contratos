@@ -56,6 +56,23 @@ function esRolPrivilegiado(rol) {
   return ['super_admin', 'admin', 'juridico'].includes(rol);
 }
 
+// Un contrato "vigente" (autorizado/activo/por_vencer) se muestra como Firmado o Pendiente de
+// firma (ver ListaContratos.jsx y DetalleContrato.jsx) según si YA existe, en cualquier momento
+// de su historial de documentos (no solo la versión vigente — un documento superado sigue
+// contando como prueba de que sí se firmó), un documento que:
+//   - Se firmó completo por Documenso (documenso_firmado_en se marca en el documento ORIGINAL que
+//     se mandó a firmar — ver procesarDocumentoFirmado en utils/firmaElectronica.js — y ya no se
+//     borra aunque después quede como versión superada), o
+//   - Se adjuntó como "Documento firmado manual" (categoria = 'firmado_manual', solo lo puede
+//     subir jurídico — ver POST .../documentos más abajo).
+// Si ninguno de los dos existe, el contrato se considera "Pendiente de firma" (incluye el caso de
+// que ni siquiera se haya mandado a firmar todavía).
+const SQL_FIRMADO = `EXISTS (
+        SELECT 1 FROM contrato_documentos fd
+        WHERE fd.contrato_id = c.id
+          AND (fd.documenso_firmado_en IS NOT NULL OR fd.categoria = 'firmado_manual')
+      ) AS firmado`;
+
 /**
  * Valida el área (page/positionX/positionY/width/height) que el usuario dibujó a mano sobre el
  * PDF en el editor visual de EnviarAFirmarModal.jsx para un firmante dado. Si no viene `area`
@@ -286,7 +303,8 @@ router.get(
 
     const where = condiciones.length ? `WHERE ${condiciones.join(' AND ')}` : '';
     const { rows } = await query(
-      `SELECT c.*, tc.nombre AS tipo_contrato_nombre, u.nombre AS solicitado_por_nombre
+      `SELECT c.*, tc.nombre AS tipo_contrato_nombre, u.nombre AS solicitado_por_nombre,
+              ${SQL_FIRMADO}
        FROM contratos c
        JOIN tipos_contrato tc ON tc.id = c.tipo_contrato_id
        JOIN usuarios u ON u.id = c.solicitado_por_id
@@ -402,8 +420,20 @@ router.get(
       servicios = serviciosRows[0] || null;
     }
 
+    // Ver SQL_FIRMADO arriba: si en cualquier momento del historial de documentos de este
+    // contrato hubo uno firmado por Documenso o uno "firmado_manual", se muestra como Firmado.
+    const { rows: firmadoRows } = await query(
+      `SELECT EXISTS (
+         SELECT 1 FROM contrato_documentos fd
+         WHERE fd.contrato_id = $1
+           AND (fd.documenso_firmado_en IS NOT NULL OR fd.categoria = 'firmado_manual')
+       ) AS firmado`,
+      [contrato.id]
+    );
+    const firmado = firmadoRows[0]?.firmado === true;
+
     res.json({
-      contrato: { ...contrato, tipoContrato },
+      contrato: { ...contrato, tipoContrato, firmado },
       aprobaciones,
       documentos: documentosConUrl,
       franquicia,
@@ -1089,6 +1119,134 @@ router.post(
 );
 
 // ---------------------------------------------------------------------------
+// Cancelación
+// ---------------------------------------------------------------------------
+const ESTATUS_SOLICITUD = ['borrador', 'en_revision', 'en_autorizacion'];
+const ESTATUS_VIGENTE = ['autorizado', 'activo', 'por_vencer'];
+
+// POST /api/contratos/:id/cancelar-solicitud - cancela una solicitud que todavía no es un
+// contrato vigente (borrador, en revisión, o en autorización). Solo quien la levantó (o un rol
+// privilegiado) puede hacerlo; el motivo es opcional, a diferencia de cancelar un contrato ya
+// vigente (ver /cancelar-contrato más abajo).
+router.post(
+  '/:id/cancelar-solicitud',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const contrato = await cargarContrato(req.params.id);
+    if (!contrato) throw notFound('Contrato no encontrado.');
+
+    const esDueño = contrato.solicitado_por_id === req.usuario.id;
+    if (!esRolPrivilegiado(req.usuario.rol) && !esDueño) {
+      throw forbidden('Solo quien levantó esta solicitud (o un administrador) puede cancelarla.');
+    }
+    if (!ESTATUS_SOLICITUD.includes(contrato.estatus)) {
+      throw conflict(
+        `Esta solicitud ya no se puede cancelar así (estatus actual: ${contrato.estatus}). ` +
+          `Si ya es un contrato vigente, usa "Cancelar contrato" en su lugar.`
+      );
+    }
+
+    const motivo = (req.body || {}).motivo || null;
+    const { rows } = await query(
+      `UPDATE contratos
+       SET estatus = 'cancelado', paso_actual_orden = NULL, cancelado_en = now(),
+           cancelado_por_id = $1, motivo_cancelacion = $2, updated_at = now()
+       WHERE id = $3 RETURNING *`,
+      [req.usuario.id, motivo, contrato.id]
+    );
+    const actualizado = rows[0];
+
+    await registrarAuditoria({
+      contratoId: contrato.id,
+      usuarioId: req.usuario.id,
+      accion: 'solicitud_cancelada',
+      detalle: `Solicitud cancelada. Motivo: ${motivo || '(sin motivo)'}`,
+    });
+    await sincronizarEstatusEnDocumentos(actualizado.id, actualizado.estatus);
+
+    try {
+      if (!esDueño) {
+        const { rows: solicitanteRows } = await query('SELECT email FROM usuarios WHERE id = $1', [contrato.solicitado_por_id]);
+        const email = solicitanteRows[0]?.email;
+        if (email) {
+          await enviarCorreo(
+            email,
+            `Tu solicitud ${actualizado.folio} fue cancelada`,
+            `<p>Tu solicitud <b>${actualizado.folio} - ${actualizado.titulo}</b> fue cancelada.` +
+              (motivo ? ` Motivo: ${motivo}` : '') +
+              `</p>`
+          );
+        }
+      }
+    } catch (err) {
+      console.error('Error enviando notificación de solicitud cancelada:', err);
+    }
+
+    res.json({ contrato: actualizado });
+  })
+);
+
+// POST /api/contratos/:id/cancelar-contrato - cancela un contrato ya vigente/activo (autorizado,
+// activo o por vencer). A diferencia de cancelar una solicitud, esto SOLO lo puede hacer jurídico
+// (pidió el usuario expresamente: "esto únicamente lo puede hacer jurídico"), y el motivo es
+// obligatorio — es la única constancia de por qué se dio de baja un contrato que ya estaba en
+// operación.
+router.post(
+  '/:id/cancelar-contrato',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    if (req.usuario.rol !== 'juridico') {
+      throw forbidden('Solo jurídico puede cancelar un contrato vigente.');
+    }
+    const contrato = await cargarContrato(req.params.id);
+    if (!contrato) throw notFound('Contrato no encontrado.');
+
+    if (!ESTATUS_VIGENTE.includes(contrato.estatus)) {
+      throw conflict(`Este contrato no está vigente/activo (estatus actual: ${contrato.estatus}).`);
+    }
+
+    const motivo = ((req.body || {}).motivo || '').trim();
+    if (!motivo) {
+      throw badRequest('El motivo de cancelación es obligatorio.');
+    }
+
+    const { rows } = await query(
+      `UPDATE contratos
+       SET estatus = 'cancelado', paso_actual_orden = NULL, cancelado_en = now(),
+           cancelado_por_id = $1, motivo_cancelacion = $2, updated_at = now()
+       WHERE id = $3 RETURNING *`,
+      [req.usuario.id, motivo, contrato.id]
+    );
+    const actualizado = rows[0];
+
+    await registrarAuditoria({
+      contratoId: contrato.id,
+      usuarioId: req.usuario.id,
+      accion: 'contrato_cancelado',
+      detalle: `Contrato vigente cancelado por jurídico. Motivo: ${motivo}`,
+    });
+    await sincronizarEstatusEnDocumentos(actualizado.id, actualizado.estatus);
+
+    try {
+      const { rows: solicitanteRows } = await query('SELECT email FROM usuarios WHERE id = $1', [contrato.solicitado_por_id]);
+      const email = solicitanteRows[0]?.email;
+      if (email) {
+        await enviarCorreo(
+          email,
+          `Contrato ${actualizado.folio} cancelado`,
+          `<p>Tu contrato <b>${actualizado.folio} - ${actualizado.titulo}</b>, que ya estaba vigente, fue cancelado por jurídico.</p>` +
+            `<p>Motivo: ${motivo}</p>`
+        );
+      }
+    } catch (err) {
+      console.error('Error enviando notificación de contrato cancelado:', err);
+    }
+
+    res.json({ contrato: actualizado });
+  })
+);
+
+// ---------------------------------------------------------------------------
 // Documentos anidados bajo contrato
 // ---------------------------------------------------------------------------
 
@@ -1106,10 +1264,18 @@ router.post(
     if (!contrato) throw notFound('Contrato no encontrado.');
     if (!req.file) throw badRequest('Falta el archivo (campo multipart "archivo").');
 
-    const categoriasValidas = ['borrador', 'version_firmada', 'anexo', 'evidencia', 'otro'];
+    const categoriasValidas = ['borrador', 'version_firmada', 'anexo', 'evidencia', 'otro', 'firmado_manual'];
     const categoria = req.body.categoria || 'otro';
     if (!categoriasValidas.includes(categoria)) {
       throw badRequest(`categoria inválida. Valores permitidos: ${categoriasValidas.join(', ')}.`);
+    }
+    // "Documento firmado manual": para contratos con firma física (no vía Documenso). A
+    // diferencia de "version_firmada" (que cualquiera con acceso al expediente puede marcar, sin
+    // que eso pruebe nada por sí solo), esta categoría es una atestación de que jurídico ya
+    // verificó las firmas físicas — por eso solo jurídico puede subirla. También cuenta para que
+    // el contrato se muestre como "Firmado" en Contratos vigentes (ver GET /contratos más abajo).
+    if (categoria === 'firmado_manual' && req.usuario.rol !== 'juridico') {
+      throw forbidden('Solo jurídico puede adjuntar un documento firmado manual.');
     }
     // Etiqueta libre para el checklist de documentos con nombre específico que piden NDA y
     // servicios (ej. "escritura_constitutiva", "repse"; ver DOCUMENTOS_REQUERIDOS en

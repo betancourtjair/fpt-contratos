@@ -401,3 +401,28 @@ CREATE TABLE contrato_servicios_detalles (
 -- "repse", "proyecto_nda"; ver DOCUMENTOS_REQUERIDOS en ContratoForm.jsx). NULL = documento
 -- genérico sin etiquetar, el comportamiento de siempre.
 ALTER TABLE contrato_documentos ADD COLUMN etiqueta TEXT;
+
+-- ---------------------------------------------------------------------------
+-- sep 2026: renombrar "Servicios Profesionales", cancelación de solicitudes/contratos vigentes,
+-- y "Documento firmado manual" (adjuntar un contrato con firma física, solo jurídico).
+-- ---------------------------------------------------------------------------
+
+-- Ya existía como fila (es_servicios = true); se renombra en vez de crear un tipo nuevo, para no
+-- perder la relación con los contratos que ya lo usan. (Esto también se puede hacer desde la app,
+-- en Administración → Tipos de contrato → Editar — esta línea es solo para que quede igual si se
+-- levanta una instalación nueva a partir de este script.)
+UPDATE tipos_contrato SET nombre = 'Prestación de servicios' WHERE nombre = 'Servicios Profesionales';
+
+-- "Documento firmado manual": un valor más de categoria_documento, junto a los que ya había.
+-- OJO: en Postgres, ALTER TYPE ... ADD VALUE no puede ir en la misma transacción que una
+-- sentencia que ya use ese valor nuevo — si tu cliente de SQL agrupa todo el archivo en una sola
+-- transacción, corre esta línea sola primero y el resto después.
+ALTER TYPE categoria_documento ADD VALUE IF NOT EXISTS 'firmado_manual';
+
+-- Cancelación: de una solicitud (por quien la levantó) o de un contrato vigente/activo (solo
+-- jurídico, con motivo obligatorio — ver POST .../cancelar-solicitud y .../cancelar-contrato en
+-- routes/contratos.js). Ambos casos dejan contratos.estatus = 'cancelado' (ya existía en el enum);
+-- estas columnas son las que permiten distinguir quién/cuándo/por qué después.
+ALTER TABLE contratos ADD COLUMN cancelado_en TIMESTAMPTZ;
+ALTER TABLE contratos ADD COLUMN cancelado_por_id UUID REFERENCES usuarios(id);
+ALTER TABLE contratos ADD COLUMN motivo_cancelacion TEXT;
