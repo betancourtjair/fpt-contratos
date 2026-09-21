@@ -35,8 +35,8 @@ function FirmaEstado({ doc, verificando, onVerificar, cancelando, onCancelar, ex
       <button type="button" className="icon-btn" onClick={() => onVerificar(doc)} disabled={ocupado}>
         {verificando ? 'Verificando…' : 'Verificar estatus'}
       </button>
-      <button type="button" className="icon-btn" onClick={() => onExtender(doc)} disabled={ocupado}>
-        {extendiendo ? 'Extendiendo…' : 'Extender 2 días'}
+      <button type="button" className="icon-btn" onClick={() => onExtender(doc)} disabled={ocupado} title="Le reenvía el correo de invitación al firmante pendiente y le da 2 días más para firmar.">
+        {extendiendo ? 'Enviando…' : 'Recordar / Extender 2 días'}
       </button>
       <button type="button" className="icon-btn" onClick={() => onCancelar(doc)} disabled={ocupado}>
         {cancelando ? 'Cancelando…' : 'Cancelar'}
