@@ -133,6 +133,7 @@ function areaPorDefecto(idx) {
  *   base64PDF: string,
  *   nombreDocumento: string,
  *   ordenada: boolean,
+    *   vencimientoDias?: number,
     *   firmantes: Array<{nombreCompleto: string, email: string, orden: number, area?: {page: number, positionX: number, positionY: number, width: number, height: number}}>,
     * }} datos
     * @returns {Promise<{submissionId: string, submitters: Array<{email: string, slug: string, embedSrc: string}>}>}
@@ -141,6 +142,12 @@ async function crearSubmission(datos) {
     if (!Array.isArray(datos.firmantes) || datos.firmantes.length === 0) {
           throw new Error('Se requiere al menos un firmante.');
     }
+    // Días antes de que el enlace de firma de cada firmante deje de funcionar (Documenso:
+    // envelopeExpirationPeriod). Documenso no cancela el envelope solo por esto — cuando vence,
+    // al dueño (esta cuenta de servicio) le llega un correo avisando, y desde ahí se puede
+    // reenviar (lo que extiende el vencimiento) o cancelar. Ver cancelarSubmission arriba para
+    // cancelar desde esta misma app.
+    const vencimientoDias = Number.isFinite(Number(datos.vencimientoDias)) ? Number(datos.vencimientoDias) : 2;
 
   const recipients = datos.firmantes.map((f, idx) => ({
         email: f.email,
@@ -169,6 +176,16 @@ async function crearSubmission(datos) {
         // notifica a todos al mismo tiempo, sin importar el orden que se haya mandado arriba.
         meta: {
                 signingOrder: datos.ordenada ? 'SEQUENTIAL' : 'PARALLEL',
+                // Vencimiento del enlace de firma (1 o 2 días, elegido en EnviarAFirmarModal.jsx).
+                envelopeExpirationPeriod: { unit: 'day', amount: vencimientoDias },
+                // Recordatorio nativo de Documenso: un solo correo de recordatorio a quien no haya
+                // firmado, 24 horas (1 día — el API no maneja unidades más finas que "day") después
+                // de haberse enviado. repeatEvery deshabilitado para que sea un único recordatorio,
+                // no uno cada N días.
+                reminderSettings: {
+                        sendAfter: { unit: 'day', amount: 1 },
+                        repeatEvery: { disabled: true },
+                },
         },
   };
 

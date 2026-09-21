@@ -1401,6 +1401,10 @@ router.post(
         };
     });
     const ordenada = Boolean(body.ordenada);
+    // Vencimiento del enlace de firma: 1 o 2 días (elegido en EnviarAFirmarModal.jsx). Cualquier
+    // otro valor recibido se ignora y se usa el default de documensoClient (2 días), para no
+    // fallar la petición por un valor inesperado.
+    const vencimientoDias = [1, 2].includes(Number(body.vencimientoDias)) ? Number(body.vencimientoDias) : 2;
 
     const bufferDocumento = await storageContratos.obtenerBuffer(documento.ruta_archivo);
     const base64PDF = bufferDocumento.toString('base64');
@@ -1409,6 +1413,7 @@ router.post(
       base64PDF,
       nombreDocumento: `${contrato.folio} - ${documento.nombre_archivo}`.slice(0, 250),
       ordenada,
+      vencimientoDias,
       firmantes,
     });
 

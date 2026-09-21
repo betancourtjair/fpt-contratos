@@ -13,6 +13,11 @@ export default function EnviarAFirmarModal({
   onEnviado,
 }) {
   const [ordenada, setOrdenada] = useState(false);
+  // Días antes de que el enlace de firma deje de funcionar (Documenso: envelopeExpirationPeriod).
+  // Junto con esto, el backend siempre configura un recordatorio automático a las 24 horas si el
+  // firmante no ha firmado (ver documensoClient.crearSubmission) — no es configurable aquí porque
+  // no tiene sentido mandarlo después de que ya venció el enlace.
+  const [vencimientoDias, setVencimientoDias] = useState(2);
   // Si el contrato ya tiene capturado el nombre o correo de la contraparte (ContratoForm.jsx),
   // se usa para prellenar al primer firmante en vez de arrancar en blanco: casi siempre la
   // contraparte es quien tiene que firmar.
@@ -94,6 +99,7 @@ const incompletos = firmantes.some((f) => !f.nombreCompleto.trim() || !f.email.t
     try {
       const resp = await api.post(`/contratos/${contratoId}/documentos/${documento.id}/enviar-a-firmar`, {
         ordenada,
+        vencimientoDias,
         firmantes: firmantes.map((f, idx) => ({ ...f, orden: idx + 1, area: areas[idx] || undefined })),
       });
       onEnviado?.();
@@ -164,6 +170,21 @@ const incompletos = firmantes.some((f) => !f.nombreCompleto.trim() || !f.email.t
             <label htmlFor="firma-ordenada" style={{ marginBottom: 0 }}>
               Requerir que firmen en el orden capturado abajo
             </label>
+          </div>
+
+          <div className="field" style={{ maxWidth: 260 }}>
+            <label htmlFor="firma-vencimiento">Vencimiento del enlace de firma</label>
+            <select
+              id="firma-vencimiento"
+              value={vencimientoDias}
+              onChange={(e) => setVencimientoDias(Number(e.target.value))}
+            >
+              <option value={1}>1 día</option>
+              <option value={2}>2 días</option>
+            </select>
+            <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+              Si no ha firmado, se le manda un recordatorio automático a las 24 horas.
+            </p>
           </div>
 
           <label style={{ display: 'block', marginBottom: 6 }}>Firmantes *</label>
