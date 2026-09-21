@@ -1539,4 +1539,62 @@ router.post(
   })
 );
 
+// POST /api/contratos/:id/documentos/:documentoId/extender-firma - extiende el vencimiento del
+// enlace de firma (Documenso: envelopeExpirationPeriod) EXACTAMENTE `dias` días a partir de
+// ahora, para quien todavía no firma. Solo aplica mientras sigue "En firma" (mismas condiciones
+// que cancelar-firma): no si ya quedó firmado, y no si ya estaba rechazado/cancelado (en ese caso
+// hay que volver a mandarlo desde cero).
+router.post(
+  '/:id/documentos/:documentoId/extender-firma',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const contrato = await cargarContrato(req.params.id);
+    if (!contrato) throw notFound('Contrato no encontrado.');
+
+    const esDueño = contrato.solicitado_por_id === req.usuario.id;
+    if (!esRolPrivilegiado(req.usuario.rol) && !esDueño) {
+      throw forbidden('No puedes extender el plazo de firma de un documento de un contrato que no solicitaste.');
+    }
+    if (!documenso.configurado()) {
+      throw badRequest('La integración con Documenso no está configurada (faltan DOCUMENSO_URL / DOCUMENSO_API_TOKEN).');
+    }
+
+    const { rows } = await query(
+      `SELECT * FROM contrato_documentos WHERE id = $1 AND contrato_id = $2`,
+      [req.params.documentoId, contrato.id]
+    );
+    const documento = rows[0];
+    if (!documento) throw notFound('Documento no encontrado.');
+    if (!documento.documenso_submission_id) {
+      throw badRequest('Este documento no se ha mandado a firmar.');
+    }
+    if (documento.documenso_firmado_en) {
+      throw conflict('Este documento ya quedó firmado; no tiene caso extender el plazo.');
+    }
+    if (documento.documenso_rechazado_en) {
+      throw conflict('El envío a firma de este documento ya estaba cancelado o rechazado.');
+    }
+
+    // Días a extender: 2 por default (lo único que ofrece el botón del frontend hoy), pero se
+    // deja aceptar 1 o 2 igual que al enviar, por si el frontend lo vuelve configurable después.
+    const dias = [1, 2].includes(Number((req.body || {}).dias)) ? Number(req.body.dias) : 2;
+
+    const recipientsExtendidos = await firmaElectronica.extenderVencimiento(documento, { dias });
+
+    await registrarAuditoria({
+      contratoId: contrato.id,
+      usuarioId: req.usuario.id,
+      accion: 'documento_firma_extendida',
+      detalle:
+        recipientsExtendidos.length > 0
+          ? `Vencimiento del enlace de firma de "${documento.nombre_archivo}" extendido ${dias} día(s) para: ${recipientsExtendidos
+              .map((r) => r.email)
+              .join(', ')}.`
+          : `Se pidió extender el vencimiento de "${documento.nombre_archivo}", pero ya no había firmantes pendientes.`,
+    });
+
+    res.json({ ok: true, dias, recipientsExtendidos });
+  })
+);
+
 module.exports = router;

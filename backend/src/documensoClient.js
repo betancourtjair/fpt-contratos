@@ -282,10 +282,66 @@ async function descargarDocumento(submissionId) {
     return Buffer.from(await resp.arrayBuffer());
 }
 
+/**
+ * Extiende el vencimiento del enlace de firma de un envelope que sigue en proceso, EXACTAMENTE
+ * `dias` días a partir de ahora (botón "Extender 2 días" en el frontend, mientras sigue "En
+ * firma") — sin importar cuántos días se hayan configurado originalmente al enviarlo.
+ *
+ * Documenso no expone una operación de "extender" directa. Se combinan dos llamadas de su API
+ * (ambas confirmadas leyendo el código fuente, self-hosted, AGPL-3.0):
+ *   1. POST /envelope/update, con meta.envelopeExpirationPeriod — packages/lib/types/
+ *      document-meta.ts confirma que ZDocumentMetaUpdateSchema es literalmente
+ *      ZDocumentMetaCreateSchema (el mismo esquema que usa crearSubmission arriba), así que
+ *      también acepta envelopeExpirationPeriod. Esto reconfigura el envelope para que, de ahí en
+ *      adelante, "vencimiento" signifique "dias" días — pero por sí sola esta llamada NO mueve la
+ *      fecha de vencimiento (expiresAt) de los firmantes que ya la tenían fija desde el envío
+ *      original.
+ *   2. POST /envelope/redistribute, con la lista de recipients (ids numéricos, NO su email) que
+ *      todavía no firman. packages/trpc/server/envelope-router/resend-document.ts (la
+ *      implementación real detrás de este endpoint) es lo que de verdad recalcula
+ *      expiresAt = ahora + envelope.documentMeta.envelopeExpirationPeriod (el que se acaba de
+ *      dejar en el paso 1) para cada uno de esos recipients, limpia expirationNotifiedAt y les
+ *      reenvía el correo de invitación — por eso hay que llamar primero a "update" y luego a
+ *      "redistribute", nunca al revés ni solo uno de los dos.
+ * Los recipients ya firmados (signingStatus 'SIGNED') o con role 'CC' se excluyen antes de
+ * mandarlos, igual que hace resend-document.ts internamente — mandarlos de todas formas no rompe
+ * nada (Documenso los ignora) pero así el log de este cliente refleja a quién realmente se le
+ * extendió el plazo.
+ *
+ * @returns {Promise<{recipientsExtendidos: Array<{email:string,nombreCompleto:string}>}>}
+ */
+async function extenderVencimiento(submissionId, dias) {
+    const diasValidos = Number.isFinite(Number(dias)) && Number(dias) > 0 ? Number(dias) : 2;
+
+    await llamar('POST', '/api/v2/envelope/update', {
+          body: {
+                envelopeId: submissionId,
+                meta: { envelopeExpirationPeriod: { unit: 'day', amount: diasValidos } },
+          },
+    });
+
+    const envelope = await consultarSubmission(submissionId);
+    const pendientes = (envelope?.recipients || []).filter(
+          (r) => r.role !== 'CC' && r.signingStatus !== 'SIGNED'
+    );
+    if (pendientes.length === 0) {
+          return { recipientsExtendidos: [] };
+    }
+
+    await llamar('POST', '/api/v2/envelope/redistribute', {
+          body: { envelopeId: submissionId, recipients: pendientes.map((r) => r.id) },
+    });
+
+    return {
+          recipientsExtendidos: pendientes.map((r) => ({ email: r.email, nombreCompleto: r.name || r.email })),
+    };
+}
+
 module.exports = {
     configurado,
     crearSubmission,
     consultarSubmission,
     descargarDocumento,
     cancelarSubmission,
+    extenderVencimiento,
 };

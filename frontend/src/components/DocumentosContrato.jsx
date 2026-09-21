@@ -19,7 +19,7 @@ function categoriaLabel(valor) {
 // mandó a firmar (mientras sigue siendo la versión vigente); una vez firmado, la versión
 // vigente pasa a ser el PDF firmado que se agregó automáticamente al expediente (ver tag
 // "Firmado en Documenso" más abajo).
-function FirmaEstado({ doc, verificando, onVerificar, cancelando, onCancelar }) {
+function FirmaEstado({ doc, verificando, onVerificar, cancelando, onCancelar, extendiendo, onExtender }) {
   if (!doc.documensoSubmissionId) return null;
   if (doc.documensoFirmadoEn) return <span className="tag-pill">Firmado</span>;
   if (doc.documensoRechazadoEn) {
@@ -28,13 +28,17 @@ function FirmaEstado({ doc, verificando, onVerificar, cancelando, onCancelar }) 
     // rechazó desde su pantalla de firma en Documenso.
     return <span className="tag-pill">{doc.documensoEstatus === 'CANCELLED' ? 'Firma cancelada' : 'Firma rechazada'}</span>;
   }
+  const ocupado = verificando || cancelando || extendiendo;
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
       <span className="tag-pill" title={doc.documensoEstatus || ''}>En firma</span>
-      <button type="button" className="icon-btn" onClick={() => onVerificar(doc)} disabled={verificando || cancelando}>
+      <button type="button" className="icon-btn" onClick={() => onVerificar(doc)} disabled={ocupado}>
         {verificando ? 'Verificando…' : 'Verificar estatus'}
       </button>
-      <button type="button" className="icon-btn" onClick={() => onCancelar(doc)} disabled={verificando || cancelando}>
+      <button type="button" className="icon-btn" onClick={() => onExtender(doc)} disabled={ocupado}>
+        {extendiendo ? 'Extendiendo…' : 'Extender 2 días'}
+      </button>
+      <button type="button" className="icon-btn" onClick={() => onCancelar(doc)} disabled={ocupado}>
         {cancelando ? 'Cancelando…' : 'Cancelar'}
       </button>
     </span>
@@ -84,6 +88,7 @@ export default function DocumentosContrato({
   const [docParaFirmar, setDocParaFirmar] = useState(null); // documento sobre el que se abrió el modal "Enviar a firmar"
   const [verificandoFirma, setVerificandoFirma] = useState({}); // documentoId -> bool
   const [cancelandoFirma, setCancelandoFirma] = useState({}); // documentoId -> bool
+  const [extendiendoFirma, setExtendiendoFirma] = useState({}); // documentoId -> bool
 
   async function verificarEstatusFirma(doc) {
     setVerificandoFirma((v) => ({ ...v, [doc.id]: true }));
@@ -111,6 +116,22 @@ export default function DocumentosContrato({
       setError(err.message || 'No se pudo cancelar el envío a firma.');
     } finally {
       setCancelandoFirma((c) => ({ ...c, [doc.id]: false }));
+    }
+  }
+
+  async function extenderFirma(doc) {
+    const confirmado = window.confirm(
+      `¿Extender 2 días más el plazo para firmar "${doc.nombreArchivo}"? Se le manda de nuevo el correo de invitación a quien todavía no firma.`
+    );
+    if (!confirmado) return;
+    setExtendiendoFirma((e) => ({ ...e, [doc.id]: true }));
+    try {
+      await api.post(`/contratos/${contratoId}/documentos/${doc.id}/extender-firma`, { dias: 2 });
+      onSubido?.();
+    } catch (err) {
+      setError(err.message || 'No se pudo extender el plazo de firma.');
+    } finally {
+      setExtendiendoFirma((e) => ({ ...e, [doc.id]: false }));
     }
   }
 
@@ -208,6 +229,8 @@ export default function DocumentosContrato({
                             onVerificar={verificarEstatusFirma}
                             cancelando={!!cancelandoFirma[doc.id]}
                             onCancelar={cancelarFirma}
+                            extendiendo={!!extendiendoFirma[doc.id]}
+                            onExtender={extenderFirma}
                           />
                         ) : (
                           <button type="button" className="icon-btn" onClick={() => setDocParaFirmar(doc)}>

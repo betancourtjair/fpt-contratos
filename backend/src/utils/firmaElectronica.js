@@ -71,6 +71,24 @@ async function cancelarEnvio(documentoDb, { motivo } = {}) {
 }
 
 /**
+ * Extiende el vencimiento del enlace de firma (botón "Extender 2 días" en el frontend, mientras
+ * sigue "En firma"): ver documensoClient.extenderVencimiento para el detalle de las dos llamadas
+ * a Documenso que hace esto por debajo. Aquí solo se refresca documenso_actualizado_at para que
+ * quede visible cuándo fue el último movimiento sobre este envío — el vencimiento en sí
+ * (expiresAt) vive solo del lado de Documenso, no se duplica en nuestra base de datos. Igual que
+ * cancelarEnvio, el registro de auditoría lo hace el llamador (ver POST .../extender-firma en
+ * routes/contratos.js), porque ahí sí se tiene a la mano el usuarioId de quien lo pidió.
+ * @returns {Promise<Array<{email:string,nombreCompleto:string}>>} firmantes a los que se les extendió el plazo
+ */
+async function extenderVencimiento(documentoDb, { dias } = {}) {
+  const { recipientsExtendidos } = await documenso.extenderVencimiento(documentoDb.documenso_submission_id, dias);
+
+  await query(`UPDATE contrato_documentos SET documenso_actualizado_at = now() WHERE id = $1`, [documentoDb.id]);
+
+  return recipientsExtendidos;
+}
+
+/**
  * Descarga el PDF ya firmado y lo agrega al expediente como una NUEVA VERSIÓN (categoría
  * version_firmada, origen 'documenso') del mismo documento que se mandó a firmar.
  */
@@ -233,4 +251,5 @@ module.exports = {
   revisarPendientes,
   interpretarEstatus,
   cancelarEnvio,
+  extenderVencimiento,
 };
