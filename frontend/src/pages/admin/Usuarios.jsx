@@ -6,11 +6,17 @@ import { useAuth } from '../../auth/AuthContext.jsx';
 const ROLES = [
   { value: 'super_admin', label: 'Super admin' },
   { value: 'admin', label: 'Administrador' },
+  { value: 'ceo', label: 'CEO' },
+  { value: 'cfo', label: 'CFO' },
   { value: 'juridico', label: 'Jurídico' },
   { value: 'aprobador', label: 'Aprobador' },
   { value: 'solicitante', label: 'Solicitante' },
   { value: 'lectura', label: 'Lectura' },
 ];
+
+// Igual que en el backend: solo un super_admin puede asignar estos roles (CEO/CFO son, sobre
+// todo, un "puesto" — los pasos de flujo ya identifican a la persona fija por id, no por rol).
+const ROLES_RESTRINGIDOS = ['super_admin', 'ceo', 'cfo'];
 
 // Sentinel del <select> de jefe directo para "esta persona no tiene" (dirección general) — se
 // manda como jefeDirectoId: null, distinto de dejarlo sin tocar (por eso no puede ser '').
@@ -25,9 +31,9 @@ const NUEVO_USUARIO_VACIO = {
 export default function Usuarios() {
   const { usuario: usuarioActual } = useAuth();
   const esSuperAdmin = usuarioActual?.rol === 'super_admin';
-  // Un admin normal no puede crear ni asignar super_admin; solo otro super_admin puede.
+  // Un admin normal no puede crear ni asignar super_admin, CEO ni CFO; solo otro super_admin puede.
   const rolesAsignables = useMemo(
-    () => (esSuperAdmin ? ROLES : ROLES.filter((r) => r.value !== 'super_admin')),
+    () => (esSuperAdmin ? ROLES : ROLES.filter((r) => !ROLES_RESTRINGIDOS.includes(r.value))),
     [esSuperAdmin]
   );
 
@@ -48,6 +54,15 @@ export default function Usuarios() {
   const [forzarCambioPassword, setForzarCambioPassword] = useState(true);
   const [errorModalPassword, setErrorModalPassword] = useState('');
   const [guardandoPassword, setGuardandoPassword] = useState(false);
+
+  // Modal de "Super Admin" para editar nombre, correo y rol (incluido CEO/CFO) de cualquier
+  // usuario. El resto de la tabla (rol/jefe directo/activo) ya era editable inline para admin+;
+  // esto se agrega aparte porque el correo (usuario de acceso) es más sensible y se reserva a
+  // super_admin.
+  const [usuarioEditar, setUsuarioEditar] = useState(null);
+  const [formEditar, setFormEditar] = useState(null);
+  const [errorModalEditar, setErrorModalEditar] = useState('');
+  const [guardandoEditar, setGuardandoEditar] = useState(false);
 
   async function cargar() {
     setCargando(true);
@@ -187,6 +202,45 @@ export default function Usuarios() {
     }
   }
 
+  function abrirModalEditar(u) {
+    setUsuarioEditar(u);
+    setFormEditar({ nombre: u.nombre || '', email: u.email || '', rol: u.rol, area: u.area || '' });
+    setErrorModalEditar('');
+  }
+
+  function cerrarModalEditar() {
+    if (guardandoEditar) return;
+    setUsuarioEditar(null);
+  }
+
+  function actualizarCampoEditar(campo, valor) {
+    setFormEditar((prev) => ({ ...prev, [campo]: valor }));
+  }
+
+  async function guardarEdicion(e) {
+    e.preventDefault();
+    setErrorModalEditar('');
+    if (!formEditar.nombre || !formEditar.email) {
+      setErrorModalEditar('Nombre y correo son requeridos.');
+      return;
+    }
+    setGuardandoEditar(true);
+    try {
+      await api.patch(`/usuarios/${usuarioEditar.id}`, {
+        nombre: formEditar.nombre,
+        email: formEditar.email,
+        rol: formEditar.rol,
+        area: formEditar.area || null,
+      });
+      setUsuarioEditar(null);
+      await cargar();
+    } catch (err) {
+      setErrorModalEditar(err.message || 'No se pudo guardar los cambios.');
+    } finally {
+      setGuardandoEditar(false);
+    }
+  }
+
   async function toggleActivo(u) {
     setGuardandoId(u.id);
     setError('');
@@ -243,10 +297,11 @@ export default function Usuarios() {
                           disabled={guardandoId === u.id || esYo}
                           onChange={(e) => cambiarRol(u, e.target.value)}
                         >
-                          {/* Si el usuario ya es super_admin y quien mira la pantalla no lo es,
-                              se conserva la opción actual aunque no pueda asignarla de nuevo. */}
-                          {(u.rol === 'super_admin' && !esSuperAdmin
-                            ? [ROLES[0], ...rolesAsignables]
+                          {/* Si el usuario ya tiene un rol restringido (super_admin/CEO/CFO) y quien
+                              mira la pantalla no es super_admin, se conserva la opción actual
+                              aunque no pueda asignarla de nuevo. */}
+                          {(ROLES_RESTRINGIDOS.includes(u.rol) && !esSuperAdmin
+                            ? [ROLES.find((r) => r.value === u.rol), ...rolesAsignables]
                             : rolesAsignables
                           ).map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
                         </select>
@@ -269,7 +324,7 @@ export default function Usuarios() {
                         </span>
                       </td>
                       <td>
-                        <div style={{ display: 'flex', gap: 8 }}>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                           <button
                             className="icon-btn"
                             disabled={guardandoId === u.id || esYo}
@@ -277,6 +332,15 @@ export default function Usuarios() {
                           >
                             {u.activo !== false ? 'Desactivar' : 'Activar'}
                           </button>
+                          {esSuperAdmin && (
+                            <button
+                              className="icon-btn"
+                              disabled={guardandoId === u.id}
+                              onClick={() => abrirModalEditar(u)}
+                            >
+                              Editar
+                            </button>
+                          )}
                           {esSuperAdmin && (
                             <button
                               className="icon-btn"
@@ -456,6 +520,73 @@ export default function Usuarios() {
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={guardandoPassword}>
                   {guardandoPassword ? 'Guardando…' : 'Guardar contraseña'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {usuarioEditar && formEditar && (
+        <div className="modal-backdrop" onClick={cerrarModalEditar}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Editar usuario</h3>
+
+            {errorModalEditar && <div className="alert alert-error">{errorModalEditar}</div>}
+
+            <form onSubmit={guardarEdicion}>
+              <div className="field">
+                <label htmlFor="editar-nombre">Nombre completo *</label>
+                <input
+                  id="editar-nombre"
+                  type="text"
+                  value={formEditar.nombre}
+                  onChange={(e) => actualizarCampoEditar('nombre', e.target.value)}
+                  autoFocus
+                />
+              </div>
+
+              <div className="field">
+                <label htmlFor="editar-email">Correo electrónico *</label>
+                <input
+                  id="editar-email"
+                  type="email"
+                  value={formEditar.email}
+                  onChange={(e) => actualizarCampoEditar('email', e.target.value)}
+                  placeholder="nombre@fpt.com.mx"
+                />
+                <p className="hint" style={{ marginTop: 4, marginBottom: 0 }}>
+                  Es el usuario con el que inicia sesión; si lo cambias, deberá usar el nuevo correo la próxima vez.
+                </p>
+              </div>
+
+              <div className="field">
+                <label htmlFor="editar-rol">Rol *</label>
+                <select
+                  id="editar-rol"
+                  value={formEditar.rol}
+                  onChange={(e) => actualizarCampoEditar('rol', e.target.value)}
+                >
+                  {ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
+              </div>
+
+              <div className="field">
+                <label htmlFor="editar-area">Área (opcional)</label>
+                <input
+                  id="editar-area"
+                  type="text"
+                  value={formEditar.area}
+                  onChange={(e) => actualizarCampoEditar('area', e.target.value)}
+                />
+              </div>
+
+              <div className="modal-actions">
+                <button type="button" className="btn btn-secondary" onClick={cerrarModalEditar} disabled={guardandoEditar}>
+                  Cancelar
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={guardandoEditar}>
+                  {guardandoEditar ? 'Guardando…' : 'Guardar cambios'}
                 </button>
               </div>
             </form>

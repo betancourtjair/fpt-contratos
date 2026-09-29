@@ -9,7 +9,10 @@ const { enviarCorreo } = require('../email');
 
 const router = express.Router();
 
-const ROLES_VALIDOS = ['super_admin', 'admin', 'juridico', 'aprobador', 'solicitante', 'lectura'];
+const ROLES_VALIDOS = ['super_admin', 'admin', 'juridico', 'aprobador', 'solicitante', 'ceo', 'cfo', 'lectura'];
+// Igual que en usuarios.js: CEO/CFO son un "puesto" y, como super_admin, solo un super_admin
+// puede asignarlos (los pasos de flujo ya identifican a la persona fija por id, no por rol).
+const ROLES_SOLO_SUPER_ADMIN = ['super_admin', 'ceo', 'cfo'];
 
 // URL del sitio para incluir en el correo de bienvenida. Configurable vía env (Render);
 // si no se define, cae al dominio propio de FPT Contratos.
@@ -63,9 +66,9 @@ router.post(
     if (!ROLES_VALIDOS.includes(rolFinal)) {
       throw badRequest(`rol inválido. Valores permitidos: ${ROLES_VALIDOS.join(', ')}.`);
     }
-    // Solo super_admin puede crear otro super_admin.
-    if (rolFinal === 'super_admin' && req.usuario.rol !== 'super_admin') {
-      throw badRequest('Solo un super_admin puede crear otro super_admin.');
+    // Solo super_admin puede crear otro super_admin, o un CEO/CFO.
+    if (ROLES_SOLO_SUPER_ADMIN.includes(rolFinal) && req.usuario.rol !== 'super_admin') {
+      throw badRequest(`Solo un super_admin puede crear un usuario con rol ${rolFinal}.`);
     }
     // Requerido desde el alta (no solo para solicitantes: cualquier persona puede algún día pedir
     // un contrato, y así no queda en blanco por descuido). "null" explícito es una respuesta

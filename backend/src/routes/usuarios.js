@@ -2,12 +2,16 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const { query } = require('../db');
 const asyncHandler = require('../utils/asyncHandler');
-const { badRequest, notFound, traducirErrorPostgres } = require('../utils/errors');
+const { badRequest, forbidden, notFound, traducirErrorPostgres } = require('../utils/errors');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { enviarCorreo } = require('../email');
 
 const router = express.Router();
-const ROLES_VALIDOS = ['super_admin', 'admin', 'juridico', 'aprobador', 'solicitante', 'lectura'];
+const ROLES_VALIDOS = ['super_admin', 'admin', 'juridico', 'aprobador', 'solicitante', 'ceo', 'cfo', 'lectura'];
+// CEO y CFO son, sobre todo, un "puesto" informativo (los pasos de flujo ya los referencian
+// como personas fijas vía aprobador_id, no por rol); pero como cualquier otro rol elevado,
+// solo un super_admin puede asignarlos — igual que super_admin.
+const ROLES_SOLO_SUPER_ADMIN = ['super_admin', 'ceo', 'cfo'];
 
 function serializarUsuario(row) {
   if (!row) return null;
@@ -41,23 +45,35 @@ router.get(
     })
   );
 
-// PATCH /api/usuarios/:id (rol, activo) - admin+
+// PATCH /api/usuarios/:id (rol, activo, nombre, area, jefeDirectoId - admin+; email y los roles
+// de ROLES_SOLO_SUPER_ADMIN - solo super_admin)
 router.patch(
   '/:id',
   requireAuth,
   requireRole('super_admin', 'admin'),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const { rol, activo, nombre, area, jefeDirectoId } = req.body || {};
+    const { rol, activo, nombre, area, jefeDirectoId, email } = req.body || {};
 
     if (rol !== undefined && !ROLES_VALIDOS.includes(rol)) {
       throw badRequest(`rol inválido. Valores permitidos: ${ROLES_VALIDOS.join(', ')}.`);
     }
-    if (rol === 'super_admin' && req.usuario.rol !== 'super_admin') {
-      throw badRequest('Solo un super_admin puede asignar el rol super_admin.');
+    if (rol !== undefined && ROLES_SOLO_SUPER_ADMIN.includes(rol) && req.usuario.rol !== 'super_admin') {
+      throw badRequest(`Solo un super_admin puede asignar el rol ${rol}.`);
     }
     if (jefeDirectoId !== undefined && jefeDirectoId !== null && String(jefeDirectoId) === String(id)) {
       throw badRequest('Un usuario no puede ser su propio jefe directo.');
+    }
+    // El correo es el usuario de acceso (login); cambiarlo es más sensible que el resto de los
+    // campos, así que —a diferencia de rol/activo/nombre/area/jefeDirecto, editables por admin+—
+    // se reserva a super_admin.
+    if (email !== undefined) {
+      if (req.usuario.rol !== 'super_admin') {
+        throw forbidden('Solo un super_admin puede cambiar el correo de un usuario.');
+      }
+      if (!email || typeof email !== 'string' || !email.includes('@')) {
+        throw badRequest('El correo no es válido.');
+      }
     }
 
     const campos = [];
@@ -68,6 +84,7 @@ router.patch(
     if (nombre !== undefined) { campos.push(`nombre = $${i++}`); valores.push(nombre); }
     if (area !== undefined) { campos.push(`area = $${i++}`); valores.push(area); }
     if (jefeDirectoId !== undefined) { campos.push(`jefe_directo_id = $${i++}`); valores.push(jefeDirectoId); }
+    if (email !== undefined) { campos.push(`email = $${i++}`); valores.push(String(email).toLowerCase()); }
 
     if (campos.length === 0) throw badRequest('No se envió ningún campo para actualizar.');
 

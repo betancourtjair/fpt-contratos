@@ -6,6 +6,8 @@ import fptLogoMark from '../assets/fpt-logo-mark.png';
 const ROL_LABELS = {
   super_admin: 'Super admin',
   admin: 'Administrador',
+  ceo: 'CEO',
+  cfo: 'CFO',
   juridico: 'Jurídico',
   aprobador: 'Aprobador',
   solicitante: 'Solicitante',
