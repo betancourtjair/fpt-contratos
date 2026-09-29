@@ -41,6 +41,14 @@ export default function Usuarios() {
   const [errorModal, setErrorModal] = useState('');
   const [creando, setCreando] = useState(false);
 
+  // Modal de "Super Admin" para fijarle una contraseña nueva a cualquier usuario sin
+  // conocer la actual (soporte / recuperación de acceso).
+  const [usuarioPasswordObjetivo, setUsuarioPasswordObjetivo] = useState(null);
+  const [nuevaPassword, setNuevaPassword] = useState('');
+  const [forzarCambioPassword, setForzarCambioPassword] = useState(true);
+  const [errorModalPassword, setErrorModalPassword] = useState('');
+  const [guardandoPassword, setGuardandoPassword] = useState(false);
+
   async function cargar() {
     setCargando(true);
     setError('');
@@ -139,6 +147,46 @@ export default function Usuarios() {
     }
   }
 
+  function abrirModalPassword(u) {
+    setUsuarioPasswordObjetivo(u);
+    setNuevaPassword('');
+    setForzarCambioPassword(true);
+    setErrorModalPassword('');
+  }
+
+  function cerrarModalPassword() {
+    if (guardandoPassword) return;
+    setUsuarioPasswordObjetivo(null);
+  }
+
+  function generarPasswordAleatoria() {
+    const alfabeto = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+    let pass = '';
+    for (let i = 0; i < 12; i++) pass += alfabeto[Math.floor(Math.random() * alfabeto.length)];
+    setNuevaPassword(pass);
+  }
+
+  async function guardarNuevaPassword(e) {
+    e.preventDefault();
+    setErrorModalPassword('');
+    if (!nuevaPassword || nuevaPassword.length < 8) {
+      setErrorModalPassword('La contraseña debe tener al menos 8 caracteres.');
+      return;
+    }
+    setGuardandoPassword(true);
+    try {
+      await api.patch(`/usuarios/${usuarioPasswordObjetivo.id}/password`, {
+        passwordNueva: nuevaPassword,
+        debeCambiarPassword: forzarCambioPassword,
+      });
+      setUsuarioPasswordObjetivo(null);
+    } catch (err) {
+      setErrorModalPassword(err.message || 'No se pudo cambiar la contraseña.');
+    } finally {
+      setGuardandoPassword(false);
+    }
+  }
+
   async function toggleActivo(u) {
     setGuardandoId(u.id);
     setError('');
@@ -221,13 +269,24 @@ export default function Usuarios() {
                         </span>
                       </td>
                       <td>
-                        <button
-                          className="icon-btn"
-                          disabled={guardandoId === u.id || esYo}
-                          onClick={() => toggleActivo(u)}
-                        >
-                          {u.activo !== false ? 'Desactivar' : 'Activar'}
-                        </button>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button
+                            className="icon-btn"
+                            disabled={guardandoId === u.id || esYo}
+                            onClick={() => toggleActivo(u)}
+                          >
+                            {u.activo !== false ? 'Desactivar' : 'Activar'}
+                          </button>
+                          {esSuperAdmin && (
+                            <button
+                              className="icon-btn"
+                              disabled={guardandoId === u.id || esYo}
+                              onClick={() => abrirModalPassword(u)}
+                            >
+                              Cambiar contraseña
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -338,6 +397,65 @@ export default function Usuarios() {
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={creando}>
                   {creando ? 'Creando…' : 'Crear usuario'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {usuarioPasswordObjetivo && (
+        <div className="modal-backdrop" onClick={cerrarModalPassword}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Cambiar contraseña</h3>
+            <p className="muted" style={{ marginTop: -8 }}>
+              Vas a establecer una nueva contraseña para <b>{usuarioPasswordObjetivo.nombre}</b> ({usuarioPasswordObjetivo.email}).
+              No necesitas conocer la contraseña actual.
+            </p>
+
+            {errorModalPassword && <div className="alert alert-error">{errorModalPassword}</div>}
+
+            <form onSubmit={guardarNuevaPassword}>
+              <div className="field">
+                <label htmlFor="reset-password">Nueva contraseña *</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    id="reset-password"
+                    type="text"
+                    value={nuevaPassword}
+                    onChange={(e) => setNuevaPassword(e.target.value)}
+                    placeholder="Mínimo 8 caracteres"
+                    autoFocus
+                    style={{ flex: 1 }}
+                  />
+                  <button type="button" className="btn btn-secondary" onClick={generarPasswordAleatoria}>
+                    Generar
+                  </button>
+                </div>
+              </div>
+
+              <div className="field checkbox-row">
+                <input
+                  id="reset-debe-cambiar"
+                  type="checkbox"
+                  checked={forzarCambioPassword}
+                  onChange={(e) => setForzarCambioPassword(e.target.checked)}
+                />
+                <label htmlFor="reset-debe-cambiar" style={{ marginBottom: 0 }}>
+                  Pedir cambiarla en el siguiente inicio de sesión
+                </label>
+              </div>
+
+              <p className="muted" style={{ fontSize: 12, marginTop: -8 }}>
+                Se le enviará un correo a {usuarioPasswordObjetivo.email} avisando que su contraseña cambió.
+              </p>
+
+              <div className="modal-actions">
+                <button type="button" className="btn btn-secondary" onClick={cerrarModalPassword} disabled={guardandoPassword}>
+                  Cancelar
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={guardandoPassword}>
+                  {guardandoPassword ? 'Guardando…' : 'Guardar contraseña'}
                 </button>
               </div>
             </form>

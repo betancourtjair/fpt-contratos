@@ -1,8 +1,10 @@
 const express = require('express');
+const bcrypt = require('bcrypt');
 const { query } = require('../db');
 const asyncHandler = require('../utils/asyncHandler');
 const { badRequest, notFound, traducirErrorPostgres } = require('../utils/errors');
 const { requireAuth, requireRole } = require('../middleware/auth');
+const { enviarCorreo } = require('../email');
 
 const router = express.Router();
 const ROLES_VALIDOS = ['super_admin', 'admin', 'juridico', 'aprobador', 'solicitante', 'lectura'];
@@ -84,6 +86,64 @@ router.patch(
       if (traducido) throw traducido;
       throw err;
     }
+  })
+);
+
+// PATCH /api/usuarios/:id/password - solo super_admin puede fijarle una contraseña nueva a
+// cualquier usuario, sin necesidad de conocer la actual (a diferencia de
+// POST /api/auth/cambiar-password, pensado para que cada quien cambie la suya). Pensado para
+// soporte: recuperar acceso a alguien que se quedó fuera, o (como en este caso) fijar la
+// contraseña de una cuenta de prueba antes de asignarla a su usuario real.
+router.patch(
+  '/:id/password',
+  requireAuth,
+  requireRole('super_admin'),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { passwordNueva, debeCambiarPassword } = req.body || {};
+
+    if (!passwordNueva || String(passwordNueva).length < 8) {
+      throw badRequest('La nueva contraseña debe tener al menos 8 caracteres.');
+    }
+
+    const { rows: existentes } = await query('SELECT * FROM usuarios WHERE id = $1', [id]);
+    const usuario = existentes[0];
+    if (!usuario) throw notFound('Usuario no encontrado.');
+
+    // Por default se exige cambiarla en el siguiente inicio de sesión, igual que en el alta;
+    // quien tiene el rol super_admin puede desmarcarlo si de verdad quiere dejarla fija.
+    const forzarCambio = debeCambiarPassword !== false;
+    const nuevoHash = await bcrypt.hash(passwordNueva, 10);
+
+    const { rows } = await query(
+      `UPDATE usuarios SET password_hash = $1, debe_cambiar_password = $2, updated_at = now()
+       WHERE id = $3 RETURNING *`,
+      [nuevoHash, forzarCambio, id]
+    );
+
+    // Aviso por correo de que su contraseña cambió; nunca debe impedir que la operación se
+    // reporte como exitosa si el envío falla.
+    try {
+      await enviarCorreo(
+        usuario.email,
+        'Tu contraseña de FPT Contratos fue actualizada',
+        `<p style="margin:0 0 16px;">Un administrador estableció una nueva contraseña temporal para tu cuenta en <b>FPT Contratos</b>.</p>
+         <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#f6f2fa; border-radius:8px; margin:0 0 20px;">
+           <tr>
+             <td style="padding:16px 18px; font-size:14px; line-height:1.8;">
+               <b>Usuario (correo):</b> ${usuario.email}<br/>
+               <b>Contraseña temporal:</b> ${passwordNueva}
+             </td>
+           </tr>
+         </table>
+         ${forzarCambio ? '<p style="margin:0 0 20px;">Al iniciar sesión se te pedirá cambiarla.</p>' : ''}
+         <p style="margin:0;">Si no esperabas este cambio, contacta a un administrador.</p>`
+      );
+    } catch (err) {
+      console.error('Error enviando correo de cambio de contraseña:', err);
+    }
+
+    res.json({ usuario: serializarUsuario(rows[0]) });
   })
 );
 
