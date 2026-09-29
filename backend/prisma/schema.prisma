@@ -13,6 +13,11 @@ datasource db {
 enum RolUsuario {
   super_admin
   admin
+  ceo
+  cfo
+  cabeza_juridico // único que autoriza del lado de Jurídico (cancelar contrato vigente,
+                  // documento firmado manual) y el único (junto a super_admin) que puede fijar
+                  // Contrato.juridicoAsignadoId. "juridico" normal solo ve y comenta.
   juridico
   aprobador
   solicitante
@@ -62,9 +67,11 @@ model Usuario {
 
   contratosSolicitados Contrato[]            @relation("SolicitadoPor")
   contratosCancelados  Contrato[]            @relation("CanceladoPor")
+  contratosAsignadosJuridico Contrato[]      @relation("JuridicoAsignado")
   aprobaciones         ContratoAprobacion[]   @relation("Aprobador")
   documentosSubidos    ContratoDocumento[]    @relation("SubidoPor")
   documentosEnviadosAFirma ContratoDocumento[] @relation("DocumensoEnviadoPor")
+  comentarios          ContratoComentario[]
   auditLogs            AuditLog[]
   pasosPorUsuario      FlujoPaso[]            @relation("AprobadorEspecifico")
   jefeDirecto          Usuario?  @relation("JefeDirecto", fields: [jefeDirectoId], references: [id])
@@ -157,19 +164,44 @@ model Contrato {
   canceladoPorId         String?
   motivoCancelacion      String?
 
+  // Persona de rol "juridico" (o Cabeza de Jurídico) asignada como responsable de dar
+  // seguimiento a ESTE contrato — solo informativo, no cambia quién aprueba el flujo. Solo
+  // Cabeza de Jurídico o super_admin puede fijarlo (ver PATCH .../juridico-asignado).
+  juridicoAsignadoId     String?
+
   createdAt              DateTime          @default(now())
   updatedAt              DateTime          @updatedAt
 
-  tipoContrato   TipoContrato     @relation(fields: [tipoContratoId], references: [id])
-  solicitadoPor  Usuario          @relation("SolicitadoPor", fields: [solicitadoPorId], references: [id])
-  plantillaFlujo FlujoPlantilla?  @relation(fields: [plantillaFlujoId], references: [id])
-  canceladoPor   Usuario?         @relation("CanceladoPor", fields: [canceladoPorId], references: [id])
+  tipoContrato    TipoContrato     @relation(fields: [tipoContratoId], references: [id])
+  solicitadoPor   Usuario          @relation("SolicitadoPor", fields: [solicitadoPorId], references: [id])
+  plantillaFlujo  FlujoPlantilla?  @relation(fields: [plantillaFlujoId], references: [id])
+  canceladoPor    Usuario?         @relation("CanceladoPor", fields: [canceladoPorId], references: [id])
+  juridicoAsignado Usuario?        @relation("JuridicoAsignado", fields: [juridicoAsignadoId], references: [id])
 
   aprobaciones ContratoAprobacion[]
   documentos   ContratoDocumento[]
+  comentarios  ContratoComentario[]
   auditLogs    AuditLog[]
 
   @@map("contratos")
+}
+
+// Notas/comentarios internos sobre un contrato (distinto del comentario que ya se guarda al
+// decidir un paso de autorización, ver ContratoAprobacion.comentarios). Pensado para que
+// jurídico deje seguimiento mientras la solicitud está en revisión (ver ESTATUS_SOLICITUD en
+// routes/contratos.js) — Cabeza de Jurídico y demás roles de nivel admin pueden comentar
+// siempre.
+model ContratoComentario {
+  id         String   @id @default(uuid())
+  contratoId String
+  usuarioId  String
+  comentario String
+  createdAt  DateTime @default(now())
+
+  contrato Contrato @relation(fields: [contratoId], references: [id], onDelete: Cascade)
+  usuario  Usuario  @relation(fields: [usuarioId], references: [id])
+
+  @@map("contrato_comentarios")
 }
 
 // Instancia de aprobación generada a partir de la plantilla al momento de enviar a autorización.

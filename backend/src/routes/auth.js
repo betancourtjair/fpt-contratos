@@ -6,13 +6,15 @@ const asyncHandler = require('../utils/asyncHandler');
 const { badRequest, unauthorized, traducirErrorPostgres } = require('../utils/errors');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { enviarCorreo } = require('../email');
+const { ROLES_NIVEL_ADMIN } = require('../utils/roles');
 
 const router = express.Router();
 
-const ROLES_VALIDOS = ['super_admin', 'admin', 'juridico', 'aprobador', 'solicitante', 'ceo', 'cfo', 'lectura'];
-// Igual que en usuarios.js: CEO/CFO son un "puesto" y, como super_admin, solo un super_admin
-// puede asignarlos (los pasos de flujo ya identifican a la persona fija por id, no por rol).
-const ROLES_SOLO_SUPER_ADMIN = ['super_admin', 'ceo', 'cfo'];
+const ROLES_VALIDOS = ['super_admin', 'admin', 'juridico', 'cabeza_juridico', 'aprobador', 'solicitante', 'ceo', 'cfo', 'lectura'];
+// Igual que en usuarios.js: CEO/CFO/Cabeza de Jurídico son un "puesto" y, como super_admin, solo
+// un super_admin puede asignarlos (los pasos de flujo ya identifican a la persona fija por id,
+// no por rol).
+const ROLES_SOLO_SUPER_ADMIN = ['super_admin', 'ceo', 'cfo', 'cabeza_juridico'];
 
 // URL del sitio para incluir en el correo de bienvenida. Configurable vía env (Render);
 // si no se define, cae al dominio propio de FPT Contratos.
@@ -56,7 +58,7 @@ router.post(
 router.post(
   '/register',
   requireAuth,
-  requireRole('super_admin', 'admin'),
+  requireRole(...ROLES_NIVEL_ADMIN),
   asyncHandler(async (req, res) => {
     const { email, nombre, password, rol, area, jefeDirectoId } = req.body || {};
     if (!email || !nombre || !password) {

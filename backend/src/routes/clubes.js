@@ -4,11 +4,12 @@ const asyncHandler = require('../utils/asyncHandler');
 const { badRequest, notFound, traducirErrorPostgres } = require('../utils/errors');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { registrarAuditoria } = require('../utils/audit');
+const { ROLES_NIVEL_ADMIN } = require('../utils/roles');
 
 const router = express.Router();
 
 // Solo estos roles administran el catálogo de clubes (dar de alta / editar / activar-desactivar).
-const ROLES_MODULO_FRANQUICIAS = ['super_admin', 'admin', 'juridico'];
+const ROLES_MODULO_FRANQUICIAS = [...ROLES_NIVEL_ADMIN, 'juridico'];
 
 // GET /api/clubes - cualquier usuario autenticado puede listarlos (para llenar formularios,
 // p.ej. quien edita un contrato de franquicia ya existente que no fue creado desde el módulo).

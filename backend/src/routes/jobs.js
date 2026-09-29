@@ -4,6 +4,7 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const { revisarVencimientos } = require('../utils/vencimientos');
 const { revisarFranquicias } = require('../utils/franquicias');
 const { revisarPendientes: revisarFirmasPendientes } = require('../utils/firmaElectronica');
+const { ROLES_NIVEL_ADMIN } = require('../utils/roles');
 
 const router = express.Router();
 
@@ -15,7 +16,7 @@ const router = express.Router();
 router.post(
   '/revisar-vencimientos',
   requireAuth,
-  requireRole('super_admin', 'admin'),
+  requireRole(...ROLES_NIVEL_ADMIN),
   asyncHandler(async (req, res) => {
     const vencimientos = await revisarVencimientos();
     const franquicias = await revisarFranquicias();
@@ -30,7 +31,7 @@ router.post(
 router.post(
   '/revisar-firmas-pendientes',
   requireAuth,
-  requireRole('super_admin', 'admin'),
+  requireRole(...ROLES_NIVEL_ADMIN),
   asyncHandler(async (req, res) => {
     const resumen = await revisarFirmasPendientes();
     res.json(resumen);

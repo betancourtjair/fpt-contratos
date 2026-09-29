@@ -5,6 +5,7 @@ const { notFound, forbidden, badRequest } = require('../utils/errors');
 const { requireAuth } = require('../middleware/auth');
 const { registrarAuditoria } = require('../utils/audit');
 const storage = require('../storage');
+const { ROLES_NIVEL_ADMIN } = require('../utils/roles');
 
 const router = express.Router();
 
@@ -22,7 +23,7 @@ router.delete(
     const documento = rows[0];
     if (!documento) throw notFound('Documento no encontrado.');
 
-    const esAdmin = ['super_admin', 'admin'].includes(req.usuario.rol);
+    const esAdmin = ROLES_NIVEL_ADMIN.includes(req.usuario.rol);
     const esQuienSubio = documento.subido_por_id === req.usuario.id;
     if (!esAdmin && !esQuienSubio) {
       throw forbidden('Solo un admin/super_admin o quien subió el documento puede eliminarlo.');

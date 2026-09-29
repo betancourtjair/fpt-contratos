@@ -3,6 +3,7 @@ const { query } = require('../db');
 const asyncHandler = require('../utils/asyncHandler');
 const { badRequest, notFound, traducirErrorPostgres } = require('../utils/errors');
 const { requireAuth, requireRole } = require('../middleware/auth');
+const { ROLES_NIVEL_ADMIN } = require('../utils/roles');
 
 const router = express.Router();
 const ROLES_VALIDOS = ['super_admin', 'admin', 'juridico', 'aprobador', 'solicitante', 'lectura'];
@@ -43,7 +44,7 @@ router.get(
 router.post(
   '/',
   requireAuth,
-  requireRole('super_admin', 'admin'),
+  requireRole(...ROLES_NIVEL_ADMIN),
   asyncHandler(async (req, res) => {
     const { nombre, tipoContratoId, activo } = req.body || {};
     if (!nombre) throw badRequest('nombre es requerido.');
@@ -66,7 +67,7 @@ router.post(
 router.patch(
   '/:id',
   requireAuth,
-  requireRole('super_admin', 'admin'),
+  requireRole(...ROLES_NIVEL_ADMIN),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const { nombre, tipoContratoId, activo } = req.body || {};
@@ -135,7 +136,7 @@ function validarPaso(body) {
 router.post(
   '/:id/pasos',
   requireAuth,
-  requireRole('super_admin', 'admin'),
+  requireRole(...ROLES_NIVEL_ADMIN),
   asyncHandler(async (req, res) => {
     const { id: plantillaId } = req.params;
     validarPaso(req.body);
@@ -183,7 +184,7 @@ router.post(
 router.patch(
   '/:id/pasos/:pasoId',
   requireAuth,
-  requireRole('super_admin', 'admin'),
+  requireRole(...ROLES_NIVEL_ADMIN),
   asyncHandler(async (req, res) => {
     const { id: plantillaId, pasoId } = req.params;
     const {
@@ -243,7 +244,7 @@ router.patch(
 router.delete(
   '/:id/pasos/:pasoId',
   requireAuth,
-  requireRole('super_admin', 'admin'),
+  requireRole(...ROLES_NIVEL_ADMIN),
   asyncHandler(async (req, res) => {
     const { id: plantillaId, pasoId } = req.params;
     const { rows } = await query(

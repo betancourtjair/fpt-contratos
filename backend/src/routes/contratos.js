@@ -22,6 +22,7 @@ const storageContratos = require('../storageContratos');
 const { condicionVisibilidad } = require('../utils/visibilidad');
 const { datosParaPlantilla, renderizarPlantilla } = require('../utils/plantillas');
 const { estatusLabel } = require('../utils/estatusLabels');
+const { ROLES_NIVEL_ADMIN, ROLES_AUTORIDAD_JURIDICA } = require('../utils/roles');
 const { sincronizarEstatusEnDocumentos } = require('../utils/documentosMetadatos');
 const documenso = require('../documensoClient');
 const firmaElectronica = require('../utils/firmaElectronica');
@@ -52,8 +53,11 @@ const MAPA_COLUMNAS = {
   diasAvisoVencimiento: 'dias_aviso_vencimiento',
 };
 
+// Antes incluía 'juridico'; ahora jurídico normal solo puede VER cualquier contrato (ver
+// puedeVerContrato) pero no editarlos ni cancelarlos — esa autoridad quedó en Cabeza de
+// Jurídico (ver ROLES_AUTORIDAD_JURIDICA), que sí forma parte de ROLES_NIVEL_ADMIN.
 function esRolPrivilegiado(rol) {
-  return ['super_admin', 'admin', 'juridico'].includes(rol);
+  return ROLES_NIVEL_ADMIN.includes(rol);
 }
 
 // Un contrato "vigente" (autorizado/activo/por_vencer) se muestra como Firmado o Pendiente de
@@ -120,7 +124,10 @@ async function cargarContrato(id) {
 }
 
 function puedeVerContrato(contrato, usuario, tienePendiente) {
-  if (esRolPrivilegiado(usuario.rol) || usuario.rol === 'lectura') return true;
+  // 'juridico' (a diferencia de 'cabeza_juridico') ya no es un rol de ROLES_NIVEL_ADMIN, pero
+  // conserva la misma visibilidad de siempre (ve cualquier contrato) — solo perdió la capacidad
+  // de editar/cancelar.
+  if (esRolPrivilegiado(usuario.rol) || usuario.rol === 'lectura' || usuario.rol === 'juridico') return true;
   if (contrato.solicitado_por_id === usuario.id) return true;
   // Antes exigía además usuario.rol === 'aprobador', pero un paso de flujo ahora puede apuntar a
   // una persona fija (Cabeza de Jurídico/CFO/CEO) sin importar cuál sea su rol de sistema —
@@ -308,10 +315,12 @@ router.get(
     const where = condiciones.length ? `WHERE ${condiciones.join(' AND ')}` : '';
     const { rows } = await query(
       `SELECT c.*, tc.nombre AS tipo_contrato_nombre, u.nombre AS solicitado_por_nombre,
+              ja.nombre AS juridico_asignado_nombre,
               ${SQL_FIRMADO}
        FROM contratos c
        JOIN tipos_contrato tc ON tc.id = c.tipo_contrato_id
        JOIN usuarios u ON u.id = c.solicitado_por_id
+       LEFT JOIN usuarios ja ON ja.id = c.juridico_asignado_id
        ${where}
        ORDER BY ${columnaOrden} ${direccionOrden} NULLS LAST`,
       valores
@@ -437,8 +446,20 @@ router.get(
     );
     const firmado = firmadoRows[0]?.firmado === true;
 
+    // Persona de rol "juridico" (o Cabeza de Jurídico) asignada como responsable de dar
+    // seguimiento a ESTE contrato (ver PATCH /:id/juridico-asignado más abajo) — informativo,
+    // visible para cualquiera que pueda ver el contrato.
+    let juridicoAsignado = null;
+    if (contrato.juridico_asignado_id) {
+      const { rows: jaRows } = await query(
+        'SELECT id, nombre, email FROM usuarios WHERE id = $1',
+        [contrato.juridico_asignado_id]
+      );
+      juridicoAsignado = jaRows[0] || null;
+    }
+
     res.json({
-      contrato: { ...contrato, tipoContrato, firmado },
+      contrato: { ...contrato, tipoContrato, firmado, juridicoAsignado },
       aprobaciones,
       documentos: documentosConUrl,
       franquicia,
@@ -865,7 +886,7 @@ router.patch(
     if (!contrato) throw notFound('Contrato no encontrado.');
 
     const esDueño = contrato.solicitado_por_id === req.usuario.id;
-    const esAdmin = ['super_admin', 'admin'].includes(req.usuario.rol);
+    const esAdmin = ROLES_NIVEL_ADMIN.includes(req.usuario.rol);
     if (!esAdmin) {
       if (!esDueño) throw forbidden('No puedes editar un contrato que no solicitaste.');
       // 'en_revision' = fue regresado por un aprobador para que el solicitante lo corrija.
@@ -912,7 +933,7 @@ router.post(
     if (!contrato) throw notFound('Contrato no encontrado.');
 
     const esDueño = contrato.solicitado_por_id === req.usuario.id;
-    const esAdmin = ['super_admin', 'admin'].includes(req.usuario.rol);
+    const esAdmin = ROLES_NIVEL_ADMIN.includes(req.usuario.rol);
     if (!esDueño && !esAdmin) {
       throw forbidden('No puedes enviar a autorización un contrato que no solicitaste.');
     }
@@ -1225,16 +1246,16 @@ router.post(
 );
 
 // POST /api/contratos/:id/cancelar-contrato - cancela un contrato ya vigente/activo (autorizado,
-// activo o por vencer). A diferencia de cancelar una solicitud, esto SOLO lo puede hacer jurídico
-// (pidió el usuario expresamente: "esto únicamente lo puede hacer jurídico"), y el motivo es
-// obligatorio — es la única constancia de por qué se dio de baja un contrato que ya estaba en
-// operación.
+// activo o por vencer). A diferencia de cancelar una solicitud, esto SOLO lo puede hacer Cabeza
+// de Jurídico (antes era cualquier persona con rol "juridico"; ahora es una autoridad exclusiva
+// de esa persona/rol específico — ver ROLES_AUTORIDAD_JURIDICA), y el motivo es obligatorio — es
+// la única constancia de por qué se dio de baja un contrato que ya estaba en operación.
 router.post(
   '/:id/cancelar-contrato',
   requireAuth,
   asyncHandler(async (req, res) => {
-    if (req.usuario.rol !== 'juridico') {
-      throw forbidden('Solo jurídico puede cancelar un contrato vigente.');
+    if (!ROLES_AUTORIDAD_JURIDICA.includes(req.usuario.rol)) {
+      throw forbidden('Solo Cabeza de Jurídico puede cancelar un contrato vigente.');
     }
     const contrato = await cargarContrato(req.params.id);
     if (!contrato) throw notFound('Contrato no encontrado.');
@@ -1261,7 +1282,7 @@ router.post(
       contratoId: contrato.id,
       usuarioId: req.usuario.id,
       accion: 'contrato_cancelado',
-      detalle: `Contrato vigente cancelado por jurídico. Motivo: ${motivo}`,
+      detalle: `Contrato vigente cancelado por Cabeza de Jurídico. Motivo: ${motivo}`,
     });
     await sincronizarEstatusEnDocumentos(actualizado.id, actualizado.estatus);
 
@@ -1272,7 +1293,7 @@ router.post(
         await enviarCorreo(
           email,
           `Contrato ${actualizado.folio} cancelado`,
-          `<p>Tu contrato <b>${actualizado.folio} - ${actualizado.titulo}</b>, que ya estaba vigente, fue cancelado por jurídico.</p>` +
+          `<p>Tu contrato <b>${actualizado.folio} - ${actualizado.titulo}</b>, que ya estaba vigente, fue cancelado por Cabeza de Jurídico.</p>` +
             `<p>Motivo: ${motivo}</p>`
         );
       }
@@ -1281,6 +1302,114 @@ router.post(
     }
 
     res.json({ contrato: actualizado });
+  })
+);
+
+// ---------------------------------------------------------------------------
+// PATCH /api/contratos/:id/juridico-asignado - fija/quita quién de jurídico da seguimiento a
+// ESTE contrato en particular (solo informativo: no cambia quién aprueba el flujo). Pidió el
+// usuario expresamente que solo Cabeza de Jurídico (y super_admin) pueda llenar este dropdown;
+// cualquiera que pueda ver el contrato ve el nombre asignado (ver GET / y GET /:id arriba).
+// ---------------------------------------------------------------------------
+router.patch(
+  '/:id/juridico-asignado',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    if (!ROLES_AUTORIDAD_JURIDICA.includes(req.usuario.rol)) {
+      throw forbidden('Solo Cabeza de Jurídico o un super_admin puede asignar a jurídico en un contrato.');
+    }
+    const contrato = await cargarContrato(req.params.id);
+    if (!contrato) throw notFound('Contrato no encontrado.');
+
+    const { juridicoAsignadoId } = req.body || {};
+    if (juridicoAsignadoId !== null && juridicoAsignadoId !== undefined) {
+      const { rows: objetivoRows } = await query('SELECT id, rol FROM usuarios WHERE id = $1', [juridicoAsignadoId]);
+      const objetivo = objetivoRows[0];
+      if (!objetivo) throw badRequest('El usuario a asignar no existe.');
+      if (!['juridico', 'cabeza_juridico'].includes(objetivo.rol)) {
+        throw badRequest('Solo se puede asignar a alguien con rol Jurídico o Cabeza de Jurídico.');
+      }
+    }
+
+    const { rows } = await query(
+      `UPDATE contratos SET juridico_asignado_id = $1, updated_at = now() WHERE id = $2 RETURNING *`,
+      [juridicoAsignadoId ?? null, contrato.id]
+    );
+    res.json({ contrato: rows[0] });
+  })
+);
+
+// ---------------------------------------------------------------------------
+// Comentarios internos del contrato (distinto del comentario que ya se guarda al decidir un
+// paso de autorización — ver contrato_aprobaciones.comentarios / AutorizacionTimeline). Pensado
+// para que jurídico deje seguimiento mientras la solicitud está en revisión.
+// ---------------------------------------------------------------------------
+
+// GET /api/contratos/:id/comentarios - cualquiera que pueda ver el contrato puede leerlos.
+router.get(
+  '/:id/comentarios',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const contrato = await cargarContrato(req.params.id);
+    if (!contrato) throw notFound('Contrato no encontrado.');
+
+    const { rows: aprobacionesResumen } = await query(
+      'SELECT aprobador_id, rol_requerido, decision, orden FROM contrato_aprobaciones WHERE contrato_id = $1',
+      [contrato.id]
+    );
+    const tienePendiente = aprobacionesResumen.some(
+      (a) =>
+        a.decision === 'pendiente' &&
+        a.orden === contrato.paso_actual_orden &&
+        (a.aprobador_id === req.usuario.id || a.rol_requerido === req.usuario.rol)
+    );
+    if (!puedeVerContrato(contrato, req.usuario, tienePendiente)) {
+      throw forbidden('No tienes acceso a este contrato.');
+    }
+
+    const { rows } = await query(
+      `SELECT cc.*, u.nombre AS usuario_nombre
+       FROM contrato_comentarios cc
+       JOIN usuarios u ON u.id = cc.usuario_id
+       WHERE cc.contrato_id = $1
+       ORDER BY cc.created_at ASC`,
+      [contrato.id]
+    );
+    res.json({ comentarios: rows });
+  })
+);
+
+// POST /api/contratos/:id/comentarios - roles de nivel admin (incluye Cabeza de Jurídico) pueden
+// comentar siempre; jurídico normal solo mientras la solicitud sigue en borrador/en_revision/
+// en_autorizacion (pidió el usuario expresamente: "únicamente para un contrato en solicitud
+// pueden agregar comentarios").
+router.post(
+  '/:id/comentarios',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const contrato = await cargarContrato(req.params.id);
+    if (!contrato) throw notFound('Contrato no encontrado.');
+
+    const puedeComentar =
+      ROLES_NIVEL_ADMIN.includes(req.usuario.rol) ||
+      (req.usuario.rol === 'juridico' && ESTATUS_SOLICITUD.includes(contrato.estatus));
+    if (!puedeComentar) {
+      throw forbidden(
+        req.usuario.rol === 'juridico'
+          ? 'Solo puedes comentar mientras la solicitud está en borrador, revisión o autorización.'
+          : 'No tienes permiso para comentar en este contrato.'
+      );
+    }
+
+    const comentario = ((req.body || {}).comentario || '').trim();
+    if (!comentario) throw badRequest('El comentario no puede estar vacío.');
+
+    const { rows } = await query(
+      `INSERT INTO contrato_comentarios (contrato_id, usuario_id, comentario)
+       VALUES ($1, $2, $3) RETURNING *`,
+      [contrato.id, req.usuario.id, comentario]
+    );
+    res.status(201).json({ comentario: { ...rows[0], usuario_nombre: req.usuario.nombre } });
   })
 );
 
@@ -1309,11 +1438,12 @@ router.post(
     }
     // "Documento firmado manual": para contratos con firma física (no vía Documenso). A
     // diferencia de "version_firmada" (que cualquiera con acceso al expediente puede marcar, sin
-    // que eso pruebe nada por sí solo), esta categoría es una atestación de que jurídico ya
-    // verificó las firmas físicas — por eso solo jurídico puede subirla. También cuenta para que
+    // que eso pruebe nada por sí solo), esta categoría es una atestación de que Cabeza de
+    // Jurídico ya verificó las firmas físicas — por eso solo esa persona/rol puede subirla (antes
+    // era cualquiera con rol "juridico" — ver ROLES_AUTORIDAD_JURIDICA). También cuenta para que
     // el contrato se muestre como "Firmado" en Contratos vigentes (ver GET /contratos más abajo).
-    if (categoria === 'firmado_manual' && req.usuario.rol !== 'juridico') {
-      throw forbidden('Solo jurídico puede adjuntar un documento firmado manual.');
+    if (categoria === 'firmado_manual' && !ROLES_AUTORIDAD_JURIDICA.includes(req.usuario.rol)) {
+      throw forbidden('Solo Cabeza de Jurídico puede adjuntar un documento firmado manual.');
     }
     // Etiqueta libre para el checklist de documentos con nombre específico que piden NDA y
     // servicios (ej. "escritura_constitutiva", "repse"; ver DOCUMENTOS_REQUERIDOS en

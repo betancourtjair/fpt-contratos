@@ -7,6 +7,7 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const { registrarAuditoria } = require('../utils/audit');
 const storage = require('../storage');
 const { LLAVES_PLANTILLA } = require('../utils/plantillas');
+const { ROLES_NIVEL_ADMIN } = require('../utils/roles');
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -42,7 +43,7 @@ router.get(
 router.post(
   '/',
   requireAuth,
-  requireRole('super_admin', 'admin'),
+  requireRole(...ROLES_NIVEL_ADMIN),
   asyncHandler(async (req, res) => {
     const { nombre, descripcion, esFranquicia, esNda, esServicios } = req.body || {};
     if (!nombre) throw badRequest('nombre es requerido.');
@@ -65,7 +66,7 @@ router.post(
 router.patch(
   '/:id',
   requireAuth,
-  requireRole('super_admin', 'admin'),
+  requireRole(...ROLES_NIVEL_ADMIN),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const { nombre, descripcion, activo, esFranquicia, esNda, esServicios } = req.body || {};
@@ -108,7 +109,7 @@ router.patch(
 router.delete(
   '/:id',
   requireAuth,
-  requireRole('super_admin', 'admin'),
+  requireRole(...ROLES_NIVEL_ADMIN),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     try {
@@ -144,7 +145,7 @@ router.delete(
 router.post(
   '/:id/plantilla',
   requireAuth,
-  requireRole('super_admin', 'admin'),
+  requireRole(...ROLES_NIVEL_ADMIN),
   upload.single('archivo'),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
@@ -194,7 +195,7 @@ router.post(
 router.delete(
   '/:id/plantilla',
   requireAuth,
-  requireRole('super_admin', 'admin'),
+  requireRole(...ROLES_NIVEL_ADMIN),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const { rows } = await query('DELETE FROM plantillas_tipo_contrato WHERE tipo_contrato_id = $1 RETURNING *', [id]);

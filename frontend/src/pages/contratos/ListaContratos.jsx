@@ -161,13 +161,14 @@ export default function ListaContratos({ vista = 'solicitudes' }) {
                 <th>Monto</th>
                 <th>Vencimiento</th>
                 <th>Estatus</th>
+                <th>Jurídico asignado</th>
                 {vista === 'vigentes' && <th>Firma</th>}
               </tr>
             </thead>
             <tbody>
               {contratos.length === 0 ? (
                 <tr>
-                  <td colSpan={vista === 'vigentes' ? 9 : 8} className="table-empty">{config.vacioTexto}</td>
+                  <td colSpan={vista === 'vigentes' ? 10 : 9} className="table-empty">{config.vacioTexto}</td>
                 </tr>
               ) : (
                 contratos.map((c) => (
@@ -180,6 +181,7 @@ export default function ListaContratos({ vista = 'solicitudes' }) {
                     <td>{formatMonto(c.monto, c.moneda)}</td>
                     <td>{formatFecha(c.fechaFin)}</td>
                     <td><EstatusBadge estatus={c.estatus} /></td>
+                    <td>{c.juridicoAsignadoNombre || '—'}</td>
                     {vista === 'vigentes' && <td><FirmaContratoBadge firmado={c.firmado} /></td>}
                   </tr>
                 ))

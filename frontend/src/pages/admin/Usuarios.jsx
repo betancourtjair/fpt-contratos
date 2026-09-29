@@ -8,15 +8,17 @@ const ROLES = [
   { value: 'admin', label: 'Administrador' },
   { value: 'ceo', label: 'CEO' },
   { value: 'cfo', label: 'CFO' },
+  { value: 'cabeza_juridico', label: 'Cabeza de Jurídico' },
   { value: 'juridico', label: 'Jurídico' },
   { value: 'aprobador', label: 'Aprobador' },
   { value: 'solicitante', label: 'Solicitante' },
   { value: 'lectura', label: 'Lectura' },
 ];
 
-// Igual que en el backend: solo un super_admin puede asignar estos roles (CEO/CFO son, sobre
-// todo, un "puesto" — los pasos de flujo ya identifican a la persona fija por id, no por rol).
-const ROLES_RESTRINGIDOS = ['super_admin', 'ceo', 'cfo'];
+// Igual que en el backend: solo un super_admin puede asignar estos roles (CEO/CFO/Cabeza de
+// Jurídico son, sobre todo, un "puesto" — los pasos de flujo ya identifican a la persona fija
+// por id, no por rol).
+const ROLES_RESTRINGIDOS = ['super_admin', 'ceo', 'cfo', 'cabeza_juridico'];
 
 // Sentinel del <select> de jefe directo para "esta persona no tiene" (dirección general) — se
 // manda como jefeDirectoId: null, distinto de dejarlo sin tocar (por eso no puede ser '').

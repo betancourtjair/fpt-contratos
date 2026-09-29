@@ -10,8 +10,8 @@ const CATEGORIAS = [
   { value: 'anexo', label: 'Anexo' },
   { value: 'evidencia', label: 'Evidencia' },
   { value: 'otro', label: 'Otro' },
-  // Solo la ve/puede elegirla jurídico (ver filtro más abajo y el checkeo en el backend,
-  // POST /:id/documentos): contratos con firma física, no vía Documenso.
+  // Solo la ve/puede elegirla Cabeza de Jurídico (ver filtro más abajo y el checkeo en el
+  // backend, POST /:id/documentos): contratos con firma física, no vía Documenso.
   { value: 'firmado_manual', label: 'Documento firmado manual' },
 ];
 
@@ -80,8 +80,11 @@ export default function DocumentosContrato({
     contraparteEmail,
 }) {
   const { usuario } = useAuth();
-  const esJuridico = usuario?.rol === 'juridico';
-  const categoriasDisponibles = CATEGORIAS.filter((c) => c.value !== 'firmado_manual' || esJuridico);
+  // Antes era cualquier persona con rol "juridico"; ahora "Documento firmado manual" es
+  // autoridad exclusiva de Cabeza de Jurídico (con super_admin de respaldo) — ver
+  // ROLES_AUTORIDAD_JURIDICA en el backend (routes/contratos.js).
+  const puedeFirmadoManual = usuario && ['super_admin', 'cabeza_juridico'].includes(usuario.rol);
+  const categoriasDisponibles = CATEGORIAS.filter((c) => c.value !== 'firmado_manual' || puedeFirmadoManual);
 
   const [archivo, setArchivo] = useState(null);
   const [categoria, setCategoria] = useState(CATEGORIAS[0].value);

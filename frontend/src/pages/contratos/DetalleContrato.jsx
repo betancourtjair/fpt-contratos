@@ -101,6 +101,19 @@ export default function DetalleContrato() {
   const [motivoCancelacion, setMotivoCancelacion] = useState('');
   const [cancelandoContrato, setCancelandoContrato] = useState(false);
 
+  // Jurídico asignado a este contrato (dropdown editable solo por Cabeza de Jurídico/super_admin).
+  const [juridicoOpciones, setJuridicoOpciones] = useState([]);
+  const [guardandoAsignado, setGuardandoAsignado] = useState(false);
+  const [errorAsignado, setErrorAsignado] = useState('');
+
+  // Hilo de comentarios internos (distinto del comentario de decisión de arriba, que ya usa el
+  // estado "comentarios").
+  const [comentariosLista, setComentariosLista] = useState([]);
+  const [cargandoComentarios, setCargandoComentarios] = useState(false);
+  const [nuevoComentario, setNuevoComentario] = useState('');
+  const [enviandoComentario, setEnviandoComentario] = useState(false);
+  const [errorComentario, setErrorComentario] = useState('');
+
   const cargar = useCallback(async () => {
     setCargando(true);
     setError('');
@@ -158,8 +171,73 @@ export default function DetalleContrato() {
   const puedeEnviar = puedeEditarEstatus && (esSolicitante || esAdmin);
   const puedeEditar = puedeEditarEstatus && (esSolicitante || esAdmin);
   const puedeCancelarSolicitud = ESTATUS_SOLICITUD.includes(contrato?.estatus) && (esSolicitante || esAdmin);
-  const puedeCancelarContrato = ESTATUS_VIGENTE.includes(contrato?.estatus) && usuario?.rol === 'juridico';
+  // Antes era cualquier persona con rol "juridico"; ahora es autoridad exclusiva de Cabeza de
+  // Jurídico (con super_admin de respaldo) — ver ROLES_AUTORIDAD_JURIDICA en el backend.
+  const puedeCancelarContrato = ESTATUS_VIGENTE.includes(contrato?.estatus)
+    && usuario && ['super_admin', 'cabeza_juridico'].includes(usuario.rol);
   const esVigente = ESTATUS_VIGENTE.includes(contrato?.estatus);
+
+  // Solo Cabeza de Jurídico (o super_admin) puede llenar el dropdown de "Jurídico asignado";
+  // jurídico normal (y el resto) solo ve el nombre ya asignado.
+  const puedeAsignarJuridico = usuario && ['super_admin', 'cabeza_juridico'].includes(usuario.rol);
+  // Los roles de nivel admin (esAdmin, incluye Cabeza de Jurídico) pueden comentar siempre;
+  // jurídico normal solo mientras la solicitud sigue en borrador/en_revision/en_autorizacion.
+  const puedeComentar = esAdmin || (usuario?.rol === 'juridico' && ESTATUS_SOLICITUD.includes(contrato?.estatus));
+
+  // Directorio de personas con rol "juridico" (y cabeza_juridico) para llenar el dropdown de
+  // asignación — solo se necesita si este usuario puede editarlo.
+  useEffect(() => {
+    if (!puedeAsignarJuridico) return;
+    api.get('/usuarios/directorio', { rol: 'juridico,cabeza_juridico' })
+      .then((data) => setJuridicoOpciones(unwrap(data, 'usuarios') || []))
+      .catch(() => {});
+  }, [puedeAsignarJuridico]);
+
+  // Hilo de comentarios internos del contrato (distinto del comentario de decisión de arriba).
+  const cargarComentarios = useCallback(async () => {
+    if (!contrato?.id) return;
+    setCargandoComentarios(true);
+    try {
+      const data = await api.get(`/contratos/${contrato.id}/comentarios`);
+      setComentariosLista(unwrap(data, 'comentarios') || []);
+    } catch {
+      // No es crítico si no cargan; se deja la lista vacía.
+    } finally {
+      setCargandoComentarios(false);
+    }
+  }, [contrato?.id]);
+
+  useEffect(() => { cargarComentarios(); }, [cargarComentarios]);
+
+  async function handleCambiarJuridicoAsignado(e) {
+    const nuevoId = e.target.value || null;
+    setErrorAsignado('');
+    setGuardandoAsignado(true);
+    try {
+      await api.patch(`/contratos/${id}/juridico-asignado`, { juridicoAsignadoId: nuevoId });
+      await cargar();
+    } catch (err) {
+      setErrorAsignado(err.message || 'No se pudo actualizar el jurídico asignado.');
+    } finally {
+      setGuardandoAsignado(false);
+    }
+  }
+
+  async function handleAgregarComentario(e) {
+    e.preventDefault();
+    if (!nuevoComentario.trim()) return;
+    setErrorComentario('');
+    setEnviandoComentario(true);
+    try {
+      await api.post(`/contratos/${id}/comentarios`, { comentario: nuevoComentario.trim() });
+      setNuevoComentario('');
+      await cargarComentarios();
+    } catch (err) {
+      setErrorComentario(err.message || 'No se pudo agregar el comentario.');
+    } finally {
+      setEnviandoComentario(false);
+    }
+  }
 
   const pasoActual = useMemo(() => {
     const ordenadas = [...aprobaciones].sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
@@ -353,8 +431,8 @@ export default function DetalleContrato() {
         <div className="card" style={{ borderColor: 'var(--color-danger, #c0392b)' }}>
           <div className="card-title">Cancelar este contrato vigente</div>
           <p className="muted" style={{ fontSize: 13, marginTop: -8 }}>
-            Esta acción es solo para jurídico y no se puede deshacer. El motivo queda guardado en el
-            expediente del contrato.
+            Esta acción es solo para Cabeza de Jurídico y no se puede deshacer. El motivo queda
+            guardado en el expediente del contrato.
           </p>
           <form onSubmit={handleCancelarContrato}>
             <div className="field">
@@ -569,6 +647,33 @@ export default function DetalleContrato() {
 
         <div>
           <div className="card">
+            <div className="card-title">Jurídico asignado</div>
+            {errorAsignado && <div className="alert alert-error">{errorAsignado}</div>}
+            {puedeAsignarJuridico ? (
+              <div className="field">
+                <label htmlFor="juridico-asignado">
+                  Persona de jurídico dando seguimiento a este contrato
+                </label>
+                <select
+                  id="juridico-asignado"
+                  value={contrato.juridicoAsignado?.id || ''}
+                  onChange={handleCambiarJuridicoAsignado}
+                  disabled={guardandoAsignado}
+                >
+                  <option value="">Sin asignar</option>
+                  {juridicoOpciones.map((op) => (
+                    <option key={op.id} value={op.id}>{op.nombre}</option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <p className="muted" style={{ margin: 0 }}>
+                {contrato.juridicoAsignado?.nombre || 'Sin asignar todavía.'}
+              </p>
+            )}
+          </div>
+
+          <div className="card">
             <div className="card-title">Flujo de autorización</div>
             <AutorizacionTimeline aprobaciones={aprobaciones} enviado={fueEnviado} />
 
@@ -606,6 +711,46 @@ export default function DetalleContrato() {
                   </button>
                 </div>
               </>
+            )}
+          </div>
+
+          <div className="card">
+            <div className="card-title">Comentarios internos</div>
+            {cargandoComentarios ? (
+              <Spinner label="Cargando comentarios…" />
+            ) : comentariosLista.length === 0 ? (
+              <p className="muted" style={{ margin: 0 }}>Aún no hay comentarios.</p>
+            ) : (
+              <ul className="comment-list" style={{ listStyle: 'none', padding: 0, margin: '0 0 16px' }}>
+                {comentariosLista.map((c) => (
+                  <li key={c.id} style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 13 }}>
+                      <strong>{c.usuarioNombre}</strong>{' '}
+                      <span className="muted">· {formatFechaHora(c.createdAt)}</span>
+                    </div>
+                    <div>{c.comentario}</div>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {errorComentario && <div className="alert alert-error">{errorComentario}</div>}
+            {puedeComentar && (
+              <form onSubmit={handleAgregarComentario}>
+                <div className="field">
+                  <label htmlFor="nuevo-comentario">Agregar comentario</label>
+                  <textarea
+                    id="nuevo-comentario"
+                    value={nuevoComentario}
+                    onChange={(e) => setNuevoComentario(e.target.value)}
+                    placeholder="Escribe un comentario para este contrato…"
+                  />
+                </div>
+                <div className="form-actions">
+                  <button type="submit" className="btn btn-secondary" disabled={enviandoComentario || !nuevoComentario.trim()}>
+                    {enviandoComentario ? 'Enviando…' : 'Comentar'}
+                  </button>
+                </div>
+              </form>
             )}
           </div>
         </div>

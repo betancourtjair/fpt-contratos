@@ -56,9 +56,12 @@ export function AuthProvider({ children }) {
     setUsuarioState(usuarioActualizado);
   }, []);
 
-  const esAdmin = usuario && ['admin', 'super_admin'].includes(usuario.rol);
+  // CEO/CFO/Cabeza de Jurídico tienen el mismo acceso administrativo que "Administrador" (son,
+  // sobre todo, un puesto — el flujo de autorización ya los identifica por persona fija, no por
+  // rol).
+  const esAdmin = usuario && ['admin', 'super_admin', 'ceo', 'cfo', 'cabeza_juridico'].includes(usuario.rol);
   // Quién puede entrar al módulo de Franquicias (dashboard, nueva solicitud, clubes).
-  const puedeFranquicias = usuario && ['super_admin', 'admin', 'juridico'].includes(usuario.rol);
+  const puedeFranquicias = usuario && ['super_admin', 'admin', 'ceo', 'cfo', 'cabeza_juridico', 'juridico'].includes(usuario.rol);
 
   const value = useMemo(
     () => ({ usuario, cargando, login, logout, esAdmin, puedeFranquicias, actualizarUsuario }),

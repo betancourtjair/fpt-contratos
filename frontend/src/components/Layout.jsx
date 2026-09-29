@@ -8,6 +8,7 @@ const ROL_LABELS = {
   admin: 'Administrador',
   ceo: 'CEO',
   cfo: 'CFO',
+  cabeza_juridico: 'Cabeza de Jurídico',
   juridico: 'Jurídico',
   aprobador: 'Aprobador',
   solicitante: 'Solicitante',

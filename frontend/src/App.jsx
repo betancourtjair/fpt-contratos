@@ -16,9 +16,9 @@ import NuevaSolicitudFranquicia from './pages/franquicias/NuevaSolicitudFranquic
 import Clubes from './pages/franquicias/Clubes.jsx';
 import CambiarPassword from './pages/CambiarPassword.jsx';
 
-// El módulo de Franquicias es exclusivo de super_admin/admin/juridico (separado del resto
-// de Contratos/Dashboard, que sí ven otros roles).
-const ROLES_FRANQUICIAS = ['super_admin', 'admin', 'juridico'];
+// El módulo de Franquicias es exclusivo de super_admin/admin/ceo/cfo/cabeza_juridico/juridico
+// (separado del resto de Contratos/Dashboard, que sí ven otros roles).
+const ROLES_FRANQUICIAS = ['super_admin', 'admin', 'ceo', 'cfo', 'cabeza_juridico', 'juridico'];
 
 export default function App() {
   return (

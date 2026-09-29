@@ -5,13 +5,14 @@ const asyncHandler = require('../utils/asyncHandler');
 const { badRequest, forbidden, notFound, traducirErrorPostgres } = require('../utils/errors');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { enviarCorreo } = require('../email');
+const { ROLES_NIVEL_ADMIN } = require('../utils/roles');
 
 const router = express.Router();
-const ROLES_VALIDOS = ['super_admin', 'admin', 'juridico', 'aprobador', 'solicitante', 'ceo', 'cfo', 'lectura'];
-// CEO y CFO son, sobre todo, un "puesto" informativo (los pasos de flujo ya los referencian
-// como personas fijas vía aprobador_id, no por rol); pero como cualquier otro rol elevado,
-// solo un super_admin puede asignarlos — igual que super_admin.
-const ROLES_SOLO_SUPER_ADMIN = ['super_admin', 'ceo', 'cfo'];
+const ROLES_VALIDOS = ['super_admin', 'admin', 'juridico', 'cabeza_juridico', 'aprobador', 'solicitante', 'ceo', 'cfo', 'lectura'];
+// CEO, CFO y Cabeza de Jurídico son, sobre todo, un "puesto" informativo (los pasos de flujo ya
+// los referencian como personas fijas vía aprobador_id, no por rol); pero como cualquier otro rol
+// elevado, solo un super_admin puede asignarlos — igual que super_admin.
+const ROLES_SOLO_SUPER_ADMIN = ['super_admin', 'ceo', 'cfo', 'cabeza_juridico'];
 
 function serializarUsuario(row) {
   if (!row) return null;
@@ -23,7 +24,7 @@ function serializarUsuario(row) {
 router.get(
   '/',
   requireAuth,
-  requireRole('super_admin', 'admin'),
+  requireRole(...ROLES_NIVEL_ADMIN),
   asyncHandler(async (req, res) => {
     const { rows } = await query('SELECT * FROM usuarios ORDER BY nombre ASC');
     res.json({ usuarios: rows.map(serializarUsuario) });
@@ -34,13 +35,24 @@ router.get(
 // A diferencia de GET / (arriba, solo admin+), cualquier usuario autenticado puede consultarla:
 // no expone rol, area ni ningun otro dato del usuario. Pensada para autocompletar firmantes
 // internos al enviar un documento a firma (ver EnviarAFirmarModal.jsx en el frontend).
+// Query opcional "rol": filtra por uno o más roles separados por coma (p.ej. "juridico" o
+// "juridico,cabeza_juridico") — usado para el selector de "Jurídico asignado" en un contrato
+// (ver DetalleContrato.jsx). Sigue sin exponer el rol de cada quien en la respuesta.
 router.get(
     '/directorio',
     requireAuth,
     asyncHandler(async (req, res) => {
-          const { rows } = await query(
-                  'SELECT id, nombre, email FROM usuarios WHERE activo = true ORDER BY nombre ASC'
-                );
+          const rolesFiltro = req.query.rol
+            ? String(req.query.rol).split(',').map((r) => r.trim()).filter(Boolean)
+            : null;
+          const { rows } = rolesFiltro && rolesFiltro.length > 0
+            ? await query(
+                'SELECT id, nombre, email FROM usuarios WHERE activo = true AND rol = ANY($1) ORDER BY nombre ASC',
+                [rolesFiltro]
+              )
+            : await query(
+                'SELECT id, nombre, email FROM usuarios WHERE activo = true ORDER BY nombre ASC'
+              );
           res.json({ usuarios: rows });
     })
   );
@@ -50,7 +62,7 @@ router.get(
 router.patch(
   '/:id',
   requireAuth,
-  requireRole('super_admin', 'admin'),
+  requireRole(...ROLES_NIVEL_ADMIN),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const { rol, activo, nombre, area, jefeDirectoId, email } = req.body || {};

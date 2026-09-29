@@ -482,3 +482,42 @@ ALTER TABLE contrato_aprobaciones ADD COLUMN permite_regresar BOOLEAN NOT NULL D
 -- misma transacción que algo que ya use el valor nuevo — si tu cliente agrupa todo en una sola
 -- transacción, corre esta línea sola primero.
 ALTER TYPE decision_aprobacion ADD VALUE IF NOT EXISTS 'regresado';
+
+-- sep 2026: roles CEO y CFO (Usuarios -> botón "Editar", solo Super Admin puede asignarlos).
+-- Son sobre todo un "puesto" informativo: el flujo de autorización ya identifica a estas
+-- personas por id fijo (aprobador_id en flujo_pasos), no por rol. Tienen el mismo acceso
+-- administrativo que 'admin' (ver requireRole en las rutas). OJO: igual que con 'regresado'
+-- arriba, cada ALTER TYPE ... ADD VALUE debe correr solo, no junto con otro que ya use el
+-- valor nuevo en la misma transacción.
+ALTER TYPE rol_usuario ADD VALUE IF NOT EXISTS 'ceo';
+ALTER TYPE rol_usuario ADD VALUE IF NOT EXISTS 'cfo';
+
+-- sep 2026: Cabeza de Jurídico (Roberto Sacasa) — único rol (junto a super_admin) que autoriza
+-- del lado de Jurídico: cancelar un contrato vigente y adjuntar "Documento firmado manual"
+-- (antes cualquier persona con rol 'juridico' podía). 'juridico' normal conserva la misma
+-- visibilidad de siempre sobre cualquier contrato, pero ya no puede editarlos/cancelarlos; a
+-- cambio puede comentar mientras la solicitud está en borrador/en_revision/en_autorizacion (ver
+-- ESTATUS_SOLICITUD y ROLES_AUTORIDAD_JURIDICA/ROLES_NIVEL_ADMIN en el backend). Mismo nivel de
+-- acceso administrativo que 'admin', igual que CEO/CFO arriba. OJO: como con 'ceo'/'cfo' arriba,
+-- corre esta línea sola, no junto con algo que ya use el valor nuevo en la misma transacción.
+ALTER TYPE rol_usuario ADD VALUE IF NOT EXISTS 'cabeza_juridico';
+
+-- Persona de rol "juridico" (o Cabeza de Jurídico) asignada como responsable de dar seguimiento
+-- a ESTE contrato en particular — solo informativo, no cambia quién aprueba el flujo. Solo
+-- Cabeza de Jurídico o super_admin puede fijarlo/cambiarlo (ver PATCH /api/contratos/:id/
+-- juridico-asignado); visible para cualquiera que pueda ver el contrato (GET / y GET /:id).
+ALTER TABLE contratos ADD COLUMN juridico_asignado_id UUID REFERENCES usuarios(id);
+
+-- Hilo de comentarios/notas internas sobre un contrato — distinto del comentario que ya se
+-- guarda al decidir un paso de autorización (contrato_aprobaciones.comentarios). Cualquiera que
+-- pueda ver el contrato puede leerlos; para escribir uno ver POST .../comentarios (roles de
+-- nivel admin siempre; jurídico normal solo mientras la solicitud está en borrador/en_revision/
+-- en_autorizacion).
+CREATE TABLE contrato_comentarios (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  contrato_id UUID NOT NULL REFERENCES contratos(id) ON DELETE CASCADE,
+  usuario_id UUID NOT NULL REFERENCES usuarios(id),
+  comentario TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX contrato_comentarios_contrato_id_idx ON contrato_comentarios(contrato_id);
