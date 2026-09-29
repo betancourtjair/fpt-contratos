@@ -426,3 +426,59 @@ ALTER TYPE categoria_documento ADD VALUE IF NOT EXISTS 'firmado_manual';
 ALTER TABLE contratos ADD COLUMN cancelado_en TIMESTAMPTZ;
 ALTER TABLE contratos ADD COLUMN cancelado_por_id UUID REFERENCES usuarios(id);
 ALTER TABLE contratos ADD COLUMN motivo_cancelacion TEXT;
+
+-- ---------------------------------------------------------------------------
+-- sep 2026: "jefe directo" por persona + flujo de autorización dinámico
+-- (Cabeza del Área Solicitante -> Cabeza de Jurídico -> CFO -> CEO, con posibilidad de
+-- "Regresar al solicitante para corrección" en vez de solo Aprobar/Rechazar). Ver
+-- utils/flujoEngine.js, routes/contratos.js (decidir) y routes/flujoPlantillas.js.
+-- No aplica al módulo de franquicias (flujo propio, sin cambios).
+-- ---------------------------------------------------------------------------
+
+-- Jefe directo de cada persona: quien resuelve dinámicamente el paso "Cabeza del Área
+-- Solicitante" de cualquier contrato que esa persona levante (ver flujoEngine.generarAprobaciones).
+-- Se pide obligatorio desde el formulario de alta (frontend/src/pages/admin/Usuarios.jsx) para
+-- que no quede en blanco por descuido, pero la columna en sí es NULLable para no romper las
+-- cuentas que ya existían antes de este cambio (hay que editarlas para completarlo).
+ALTER TABLE usuarios ADD COLUMN jefe_directo_id UUID REFERENCES usuarios(id);
+
+-- Un paso de flujo_pasos ahora puede señalar "el aprobador es el jefe directo de quien levantó
+-- ESTE contrato" (resuelto por contrato, no fijo en la plantilla) en vez de un rol_aprobador o un
+-- aprobador_id fijos. Y cada paso indica si, al no estar de acuerdo, quien decide puede "regresar"
+-- la solicitud al solicitante para que la corrija y la reenvíe (en vez de solo poder rechazarla
+-- de forma definitiva) — en el diagrama acordado, el primer paso (jefe directo) no lo permite,
+-- los siguientes tres sí.
+ALTER TABLE flujo_pasos ADD COLUMN es_jefe_directo_solicitante BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE flujo_pasos ADD COLUMN permite_regresar BOOLEAN NOT NULL DEFAULT TRUE;
+
+-- Se reemplaza el CHECK original (exigía rol_aprobador O aprobador_id) por uno que también acepta
+-- es_jefe_directo_solicitante = true como una tercera forma válida de resolver el aprobador. Se
+-- busca el nombre real de la restricción en vez de asumirlo, por si Postgres la nombró distinto.
+DO $$
+DECLARE
+  nombre_restriccion text;
+BEGIN
+  SELECT conname INTO nombre_restriccion
+  FROM pg_constraint
+  WHERE conrelid = 'flujo_pasos'::regclass
+    AND contype = 'c'
+    AND pg_get_constraintdef(oid) ILIKE '%rol_aprobador%aprobador_id%';
+  IF nombre_restriccion IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE flujo_pasos DROP CONSTRAINT %I', nombre_restriccion);
+  END IF;
+END $$;
+ALTER TABLE flujo_pasos ADD CONSTRAINT flujo_pasos_aprobador_check
+  CHECK (rol_aprobador IS NOT NULL OR aprobador_id IS NOT NULL OR es_jefe_directo_solicitante = true);
+
+-- contrato_aprobaciones copia permite_regresar del paso al generarse (ver generarAprobaciones),
+-- así el frontend sabe si mostrar el botón "Regresar" para el paso pendiente actual sin tener que
+-- volver a consultar la plantilla.
+ALTER TABLE contrato_aprobaciones ADD COLUMN permite_regresar BOOLEAN NOT NULL DEFAULT TRUE;
+
+-- Nueva decisión posible en contrato_aprobaciones.decision, junto a aprobado/rechazado/omitido:
+-- "regresado" dejarlo el contrato en estatus 'en_revision' (ya existía en estatus_contrato, sin
+-- usarse) en vez de 'rechazado', para que el solicitante lo corrija y reenvíe el mismo flujo desde
+-- el paso 1. OJO: igual que con 'firmado_manual' antes, ALTER TYPE ... ADD VALUE no puede ir en la
+-- misma transacción que algo que ya use el valor nuevo — si tu cliente agrupa todo en una sola
+-- transacción, corre esta línea sola primero.
+ALTER TYPE decision_aprobacion ADD VALUE IF NOT EXISTS 'regresado';

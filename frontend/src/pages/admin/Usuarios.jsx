@@ -12,8 +12,12 @@ const ROLES = [
   { value: 'lectura', label: 'Lectura' },
 ];
 
+// Sentinel del <select> de jefe directo para "esta persona no tiene" (dirección general) — se
+// manda como jefeDirectoId: null, distinto de dejarlo sin tocar (por eso no puede ser '').
+const SIN_JEFE_DIRECTO = '__sin_jefe_directo__';
+
 const NUEVO_USUARIO_VACIO = {
-  nombre: '', email: '', password: '', rol: 'solicitante', area: '',
+  nombre: '', email: '', password: '', rol: 'solicitante', area: '', jefeDirectoId: '',
   // Marcado por default: al primer login se le exige establecer su propia contraseña.
   debeCambiarPassword: true,
 };
@@ -79,6 +83,13 @@ export default function Usuarios() {
       setErrorModal('La contraseña debe tener al menos 8 caracteres.');
       return;
     }
+    // Obligatorio desde el alta (aunque la respuesta válida sea "no tiene"): el flujo de
+    // autorización de contratos usa el jefe directo para resolver quién es "Cabeza del Área
+    // Solicitante", y pedirlo aquí evita que quede en blanco por descuido.
+    if (!nuevoUsuario.jefeDirectoId) {
+      setErrorModal('Indica el jefe directo (o marca "No tiene jefe directo" si aplica).');
+      return;
+    }
 
     setCreando(true);
     try {
@@ -88,6 +99,7 @@ export default function Usuarios() {
         password: nuevoUsuario.password,
         rol: nuevoUsuario.rol,
         area: nuevoUsuario.area || undefined,
+        jefeDirectoId: nuevoUsuario.jefeDirectoId === SIN_JEFE_DIRECTO ? null : nuevoUsuario.jefeDirectoId,
         debeCambiarPassword: nuevoUsuario.debeCambiarPassword,
       });
       setMostrarModal(false);
@@ -107,6 +119,21 @@ export default function Usuarios() {
       await cargar();
     } catch (err) {
       setError(err.message || 'No se pudo cambiar el rol.');
+    } finally {
+      setGuardandoId(null);
+    }
+  }
+
+  async function cambiarJefeDirecto(u, jefeDirectoId) {
+    setGuardandoId(u.id);
+    setError('');
+    try {
+      await api.patch(`/usuarios/${u.id}`, {
+        jefeDirectoId: jefeDirectoId === SIN_JEFE_DIRECTO ? null : jefeDirectoId,
+      });
+      await cargar();
+    } catch (err) {
+      setError(err.message || 'No se pudo cambiar el jefe directo.');
     } finally {
       setGuardandoId(null);
     }
@@ -147,13 +174,14 @@ export default function Usuarios() {
                 <th>Nombre</th>
                 <th>Correo</th>
                 <th>Rol</th>
+                <th>Jefe directo</th>
                 <th>Estatus</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
               {usuarios.length === 0 ? (
-                <tr><td colSpan={5} className="table-empty">No hay usuarios registrados.</td></tr>
+                <tr><td colSpan={6} className="table-empty">No hay usuarios registrados.</td></tr>
               ) : (
                 usuarios.map((u) => {
                   const esYo = String(u.id) === String(usuarioActual?.id);
@@ -173,6 +201,18 @@ export default function Usuarios() {
                             ? [ROLES[0], ...rolesAsignables]
                             : rolesAsignables
                           ).map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                        </select>
+                      </td>
+                      <td>
+                        <select
+                          value={u.jefeDirectoId || SIN_JEFE_DIRECTO}
+                          disabled={guardandoId === u.id}
+                          onChange={(e) => cambiarJefeDirecto(u, e.target.value)}
+                        >
+                          <option value={SIN_JEFE_DIRECTO}>— Sin jefe directo —</option>
+                          {usuarios.filter((otro) => otro.id !== u.id).map((otro) => (
+                            <option key={otro.id} value={otro.id}>{otro.nombre}</option>
+                          ))}
                         </select>
                       </td>
                       <td>
@@ -258,6 +298,22 @@ export default function Usuarios() {
                   value={nuevoUsuario.area}
                   onChange={(e) => actualizarCampo('area', e.target.value)}
                 />
+              </div>
+
+              <div className="field">
+                <label htmlFor="nuevo-jefe-directo">Jefe directo *</label>
+                <select
+                  id="nuevo-jefe-directo"
+                  value={nuevoUsuario.jefeDirectoId}
+                  onChange={(e) => actualizarCampo('jefeDirectoId', e.target.value)}
+                >
+                  <option value="">Selecciona…</option>
+                  <option value={SIN_JEFE_DIRECTO}>— No tiene jefe directo (dirección general) —</option>
+                  {usuarios.map((u) => <option key={u.id} value={u.id}>{u.nombre}</option>)}
+                </select>
+                <p className="hint" style={{ marginTop: 4, marginBottom: 0 }}>
+                  El flujo de autorización de contratos lo usa para saber quién es la "Cabeza del Área" de esta persona.
+                </p>
               </div>
 
               <div className="field checkbox-row">

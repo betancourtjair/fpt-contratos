@@ -46,13 +46,16 @@ router.patch(
   requireRole('super_admin', 'admin'),
   asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const { rol, activo, nombre, area } = req.body || {};
+    const { rol, activo, nombre, area, jefeDirectoId } = req.body || {};
 
     if (rol !== undefined && !ROLES_VALIDOS.includes(rol)) {
       throw badRequest(`rol inválido. Valores permitidos: ${ROLES_VALIDOS.join(', ')}.`);
     }
     if (rol === 'super_admin' && req.usuario.rol !== 'super_admin') {
       throw badRequest('Solo un super_admin puede asignar el rol super_admin.');
+    }
+    if (jefeDirectoId !== undefined && jefeDirectoId !== null && String(jefeDirectoId) === String(id)) {
+      throw badRequest('Un usuario no puede ser su propio jefe directo.');
     }
 
     const campos = [];
@@ -62,6 +65,7 @@ router.patch(
     if (activo !== undefined) { campos.push(`activo = $${i++}`); valores.push(Boolean(activo)); }
     if (nombre !== undefined) { campos.push(`nombre = $${i++}`); valores.push(nombre); }
     if (area !== undefined) { campos.push(`area = $${i++}`); valores.push(area); }
+    if (jefeDirectoId !== undefined) { campos.push(`jefe_directo_id = $${i++}`); valores.push(jefeDirectoId); }
 
     if (campos.length === 0) throw badRequest('No se envió ningún campo para actualizar.');
 

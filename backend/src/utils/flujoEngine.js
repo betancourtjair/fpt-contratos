@@ -41,8 +41,38 @@ function pasoAplicaPorMonto(paso, monto) {
 }
 
 /**
+ * Resuelve el aprobador_id real de un paso "es_jefe_directo_solicitante": el jefe directo de
+ * quien levantó ESTE contrato (no un rol ni una persona fija en la plantilla). Truena con un
+ * mensaje claro si a ese solicitante todavía no se le configuró jefe directo (dato requerido
+ * desde el alta de personas, pero las cuentas creadas antes de ese cambio pueden no tenerlo).
+ */
+async function resolverJefeDirecto(client, contrato) {
+  const { rows } = await client.query(
+    'SELECT id, nombre, jefe_directo_id FROM usuarios WHERE id = $1',
+    [contrato.solicitado_por_id]
+  );
+  const solicitante = rows[0];
+  if (!solicitante) {
+    throw badRequest('El solicitante de este contrato ya no existe; no se puede resolver "Cabeza del Área".');
+  }
+  if (!solicitante.jefe_directo_id) {
+    throw badRequest(
+      `${solicitante.nombre} no tiene un "jefe directo" configurado. Ve a Administración → Usuarios y ` +
+        'asígnaselo antes de enviar este contrato a autorización.'
+    );
+  }
+  return solicitante.jefe_directo_id;
+}
+
+/**
  * Genera las filas contrato_aprobaciones para un contrato a partir de su plantilla aplicable.
  * Debe ejecutarse dentro de una transacción. Devuelve { aprobaciones, primerOrdenPendiente }.
+ *
+ * Idempotente por diseño (ON CONFLICT ... DO UPDATE): si el contrato ya tenía aprobaciones de una
+ * ronda anterior (p.ej. se "regresó" al solicitante y este lo reenvía), esta llamada reinicia esas
+ * mismas filas (mismo orden) en vez de chocar con el UNIQUE(contrato_id, orden) — el flujo siempre
+ * arranca de nuevo desde el paso 1. El historial de quién decidió qué en la ronda anterior queda
+ * en la bitácora de auditoría (registrarAuditoria), no en estas filas.
  */
 async function generarAprobaciones(client, contrato, plantilla) {
   const { rows: pasos } = await client.query(
@@ -60,17 +90,29 @@ async function generarAprobaciones(client, contrato, plantilla) {
   for (const paso of pasos) {
     const aplica = pasoAplicaPorMonto(paso, contrato.monto);
     const decision = aplica ? 'pendiente' : 'omitido';
+    const aprobadorId = paso.es_jefe_directo_solicitante
+      ? await resolverJefeDirecto(client, contrato)
+      : paso.aprobador_id;
     const { rows } = await client.query(
       `INSERT INTO contrato_aprobaciones
-         (contrato_id, orden, nombre_paso, aprobador_id, rol_requerido, decision, decidido_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+         (contrato_id, orden, nombre_paso, aprobador_id, rol_requerido, permite_regresar, decision, comentarios, decidido_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, $8)
+       ON CONFLICT (contrato_id, orden) DO UPDATE SET
+         nombre_paso = EXCLUDED.nombre_paso,
+         aprobador_id = EXCLUDED.aprobador_id,
+         rol_requerido = EXCLUDED.rol_requerido,
+         permite_regresar = EXCLUDED.permite_regresar,
+         decision = EXCLUDED.decision,
+         comentarios = NULL,
+         decidido_at = EXCLUDED.decidido_at
        RETURNING *`,
       [
         contrato.id,
         paso.orden,
         paso.nombre,
-        paso.aprobador_id,
+        aprobadorId,
         paso.rol_aprobador,
+        paso.permite_regresar,
         decision,
         decision === 'omitido' ? new Date() : null,
       ]
@@ -80,6 +122,14 @@ async function generarAprobaciones(client, contrato, plantilla) {
       primerOrdenPendiente = paso.orden;
     }
   }
+
+  // Si la plantilla se editó y ahora tiene MENOS pasos que en una ronda anterior, las filas
+  // sobrantes (orden más alto que el último paso actual) se eliminan para no dejar aprobaciones
+  // huérfanas de una configuración vieja.
+  await client.query(
+    'DELETE FROM contrato_aprobaciones WHERE contrato_id = $1 AND orden > $2',
+    [contrato.id, Math.max(...pasos.map((p) => p.orden))]
+  );
 
   return { aprobaciones, primerOrdenPendiente };
 }

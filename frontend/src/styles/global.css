@@ -588,6 +588,7 @@ tbody tr:hover { background: var(--fpt-purple-50); }
 .tl-dot.aprobado { background: var(--color-success); }
 .tl-dot.rechazado { background: var(--color-danger); }
 .tl-dot.omitido { background: #d8d5e4; color: #857f9c; }
+.tl-dot.regresado { background: #1d63b0; }
 .tl-dot.actual { background: var(--color-primary); box-shadow: 0 0 0 4px var(--fpt-purple-100); }
 
 .tl-line {

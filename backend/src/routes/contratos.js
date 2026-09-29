@@ -122,7 +122,11 @@ async function cargarContrato(id) {
 function puedeVerContrato(contrato, usuario, tienePendiente) {
   if (esRolPrivilegiado(usuario.rol) || usuario.rol === 'lectura') return true;
   if (contrato.solicitado_por_id === usuario.id) return true;
-  if (usuario.rol === 'aprobador' && tienePendiente) return true;
+  // Antes exigía además usuario.rol === 'aprobador', pero un paso de flujo ahora puede apuntar a
+  // una persona fija (Cabeza de Jurídico/CFO/CEO) sin importar cuál sea su rol de sistema —
+  // tienePendiente ya confirma que ESTE usuario es el aprobador asignado al paso actual, así que
+  // basta con eso.
+  if (tienePendiente) return true;
   return false;
 }
 
@@ -350,18 +354,19 @@ router.get(
     if (!contrato) throw notFound('Contrato no encontrado.');
 
     const { rows: aprobaciones } = await query(
-      'SELECT * FROM contrato_aprobaciones WHERE contrato_id = $1 ORDER BY orden ASC',
+      `SELECT ca.*, au.nombre AS aprobador_nombre
+       FROM contrato_aprobaciones ca
+       LEFT JOIN usuarios au ON au.id = ca.aprobador_id
+       WHERE ca.contrato_id = $1 ORDER BY ca.orden ASC`,
       [contrato.id]
     );
 
-    const tienePendiente =
-      req.usuario.rol === 'aprobador' &&
-      aprobaciones.some(
-        (a) =>
-          a.decision === 'pendiente' &&
-          a.orden === contrato.paso_actual_orden &&
-          (a.aprobador_id === req.usuario.id || a.rol_requerido === req.usuario.rol)
-      );
+    const tienePendiente = aprobaciones.some(
+      (a) =>
+        a.decision === 'pendiente' &&
+        a.orden === contrato.paso_actual_orden &&
+        (a.aprobador_id === req.usuario.id || a.rol_requerido === req.usuario.rol)
+    );
 
     if (!puedeVerContrato(contrato, req.usuario, tienePendiente)) {
       throw forbidden('No tienes acceso a este contrato.');
@@ -863,8 +868,9 @@ router.patch(
     const esAdmin = ['super_admin', 'admin'].includes(req.usuario.rol);
     if (!esAdmin) {
       if (!esDueño) throw forbidden('No puedes editar un contrato que no solicitaste.');
-      if (contrato.estatus !== 'borrador') {
-        throw forbidden('Solo se puede editar un contrato mientras está en borrador.');
+      // 'en_revision' = fue regresado por un aprobador para que el solicitante lo corrija.
+      if (!['borrador', 'en_revision'].includes(contrato.estatus)) {
+        throw forbidden('Solo se puede editar un contrato mientras está en borrador o fue regresado para corrección.');
       }
     }
 
@@ -910,8 +916,13 @@ router.post(
     if (!esDueño && !esAdmin) {
       throw forbidden('No puedes enviar a autorización un contrato que no solicitaste.');
     }
-    if (contrato.estatus !== 'borrador') {
-      throw conflict(`El contrato debe estar en estatus 'borrador' para enviarse a autorización (estatus actual: ${contrato.estatus}).`);
+    // 'en_revision' = fue regresado por un aprobador; reenviarlo reinicia el flujo desde el paso 1
+    // (ver generarAprobaciones, que reutiliza las mismas filas de contrato_aprobaciones).
+    if (!['borrador', 'en_revision'].includes(contrato.estatus)) {
+      throw conflict(
+        `El contrato debe estar en estatus 'borrador' o 'en_revision' para enviarse a autorización ` +
+          `(estatus actual: ${contrato.estatus}).`
+      );
     }
 
     const resultado = await withTransaction(async (client) => {
@@ -978,8 +989,13 @@ router.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     const { decision, comentarios } = req.body || {};
-    if (!['aprobado', 'rechazado'].includes(decision)) {
-      throw badRequest("decision debe ser 'aprobado' o 'rechazado'.");
+    if (!['aprobado', 'rechazado', 'regresado'].includes(decision)) {
+      throw badRequest("decision debe ser 'aprobado', 'rechazado' o 'regresado'.");
+    }
+    // A diferencia de rechazar (cierra la solicitud), "regresar" pide que el solicitante corrija
+    // algo puntual — el motivo no es opcional, igual que al cancelar un contrato ya vigente.
+    if (decision === 'regresado' && !String(comentarios || '').trim()) {
+      throw badRequest('Debes indicar qué debe corregir el solicitante para regresarle la solicitud.');
     }
 
     const resultado = await withTransaction(async (client) => {
@@ -1009,6 +1025,9 @@ router.post(
       if (!autorizado) {
         throw forbidden('No eres el aprobador asignado a este paso.');
       }
+      if (decision === 'regresado' && aprobacion.permite_regresar === false) {
+        throw badRequest('Este paso no permite "Regresar al solicitante"; solo puedes aprobar o rechazar.');
+      }
 
       await client.query(
         `UPDATE contrato_aprobaciones
@@ -1017,10 +1036,11 @@ router.post(
         [decision, comentarios || null, aprobacion.id]
       );
 
+      const ACCIONES_AUDITORIA = { aprobado: 'paso_aprobado', rechazado: 'paso_rechazado', regresado: 'paso_regresado' };
       await registrarAuditoria({
         contratoId: contrato.id,
         usuarioId: req.usuario.id,
-        accion: decision === 'aprobado' ? 'paso_aprobado' : 'paso_rechazado',
+        accion: ACCIONES_AUDITORIA[decision],
         detalle: `Paso "${aprobacion.nombre_paso}" (orden ${aprobacion.orden}). Comentarios: ${comentarios || '(sin comentarios)'}`,
         db: client,
       });
@@ -1043,6 +1063,24 @@ router.post(
           db: client,
         });
         notificacion = { tipo: 'rechazado', destinatarioId: contrato.solicitado_por_id };
+      } else if (decision === 'regresado') {
+        // A diferencia de rechazar (cierra la solicitud para siempre), 'en_revision' deja que el
+        // solicitante la edite (ver PATCH /:id) y la reenvíe (POST /:id/enviar-autorizacion, que
+        // reinicia el flujo completo desde el paso 1 con generarAprobaciones).
+        const { rows } = await client.query(
+          `UPDATE contratos SET estatus = 'en_revision', paso_actual_orden = NULL, updated_at = now()
+           WHERE id = $1 RETURNING *`,
+          [contrato.id]
+        );
+        contratoActualizado = rows[0];
+        await registrarAuditoria({
+          contratoId: contrato.id,
+          usuarioId: req.usuario.id,
+          accion: 'contrato_regresado_a_solicitante',
+          detalle: `Regresado en el paso "${aprobacion.nombre_paso}" para que el solicitante lo corrija.`,
+          db: client,
+        });
+        notificacion = { tipo: 'regresado', destinatarioId: contrato.solicitado_por_id };
       } else {
         const siguiente = await siguienteOrdenPendiente(client, contrato.id, aprobacion.orden);
         if (siguiente !== null) {
@@ -1096,18 +1134,18 @@ router.post(
             `<p>El contrato <b>${resultado.contrato.folio} - ${resultado.contrato.titulo}</b> requiere tu autorización en el paso "${resultado.notificacion.paso.nombre_paso}".</p>`
           );
         }
-      } else if (resultado.notificacion?.tipo === 'rechazado' || resultado.notificacion?.tipo === 'activado') {
+      } else if (['rechazado', 'activado', 'regresado'].includes(resultado.notificacion?.tipo)) {
         const { rows } = await query('SELECT email FROM usuarios WHERE id = $1', [resultado.notificacion.destinatarioId]);
         const solicitanteEmail = rows[0]?.email;
         if (solicitanteEmail) {
-          const esRechazo = resultado.notificacion.tipo === 'rechazado';
-          await enviarCorreo(
-            solicitanteEmail,
-            `Contrato ${resultado.contrato.folio} ${esRechazo ? 'rechazado' : 'autorizado y activado'}`,
-            esRechazo
-              ? `<p>Tu contrato <b>${resultado.contrato.folio} - ${resultado.contrato.titulo}</b> fue rechazado. Comentarios: ${comentarios || '(sin comentarios)'}</p>`
-              : `<p>Tu contrato <b>${resultado.contrato.folio} - ${resultado.contrato.titulo}</b> fue autorizado en su totalidad y ahora está activo. Ya puedes administrar sus documentos y datos en su expediente.</p>`
-          );
+          const tipo = resultado.notificacion.tipo;
+          const asunto = { rechazado: 'rechazado', activado: 'autorizado y activado', regresado: 'regresado para corrección' }[tipo];
+          const cuerpo = {
+            rechazado: `<p>Tu contrato <b>${resultado.contrato.folio} - ${resultado.contrato.titulo}</b> fue rechazado. Comentarios: ${comentarios || '(sin comentarios)'}</p>`,
+            activado: `<p>Tu contrato <b>${resultado.contrato.folio} - ${resultado.contrato.titulo}</b> fue autorizado en su totalidad y ahora está activo. Ya puedes administrar sus documentos y datos en su expediente.</p>`,
+            regresado: `<p>Tu solicitud <b>${resultado.contrato.folio} - ${resultado.contrato.titulo}</b> fue regresada para que la corrijas. Qué corregir: ${comentarios || '(sin comentarios)'}</p><p>Corrígela y vuelve a enviarla a autorización.</p>`,
+          }[tipo];
+          await enviarCorreo(solicitanteEmail, `Contrato ${resultado.contrato.folio} ${asunto}`, cuerpo);
         }
       }
     } catch (err) {

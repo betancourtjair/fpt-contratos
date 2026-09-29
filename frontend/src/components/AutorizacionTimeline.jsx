@@ -4,12 +4,13 @@ const ICONOS = {
   aprobado: '✓',
   rechazado: '✕',
   omitido: '–',
+  regresado: '↩',
   pendiente: '',
 };
 
 function normalizarDecision(aprobacion) {
   const d = (aprobacion.decision || '').toLowerCase();
-  if (d === 'aprobado' || d === 'rechazado' || d === 'omitido') return d;
+  if (d === 'aprobado' || d === 'rechazado' || d === 'omitido' || d === 'regresado') return d;
   return 'pendiente';
 }
 

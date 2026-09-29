@@ -111,11 +111,11 @@ router.get(
 );
 
 function validarPaso(body) {
-  const { orden, nombre, rolAprobador, aprobadorId, montoMinimo, montoMaximo } = body || {};
+  const { orden, nombre, rolAprobador, aprobadorId, esJefeDirectoSolicitante, montoMinimo, montoMaximo } = body || {};
   if (orden === undefined || orden === null) throw badRequest('orden es requerido.');
   if (!nombre) throw badRequest('nombre es requerido.');
-  if (!rolAprobador && !aprobadorId) {
-    throw badRequest('Debes indicar rolAprobador o aprobadorId (al menos uno).');
+  if (!rolAprobador && !aprobadorId && !esJefeDirectoSolicitante) {
+    throw badRequest('Debes indicar rolAprobador, aprobadorId, o marcar esJefeDirectoSolicitante.');
   }
   if (rolAprobador && !ROLES_VALIDOS.includes(rolAprobador)) {
     throw badRequest(`rolAprobador inválido. Valores permitidos: ${ROLES_VALIDOS.join(', ')}.`);
@@ -139,7 +139,13 @@ router.post(
   asyncHandler(async (req, res) => {
     const { id: plantillaId } = req.params;
     validarPaso(req.body);
-    const { orden, nombre, rolAprobador, aprobadorId, montoMinimo, montoMaximo, obligatorio } = req.body;
+    const {
+      orden, nombre, rolAprobador, aprobadorId, esJefeDirectoSolicitante, permiteRegresar,
+      montoMinimo, montoMaximo, obligatorio,
+    } = req.body;
+    // Un paso "jefe directo" no usa rol/usuario fijo — se ignoran aunque vengan en el body, para
+    // no dejar datos inconsistentes (ver CHECK flujo_pasos_aprobador_check en la migración).
+    const esDinamico = Boolean(esJefeDirectoSolicitante);
 
     const plantilla = await query('SELECT id FROM flujo_plantillas WHERE id = $1', [plantillaId]);
     if (!plantilla.rows[0]) throw notFound('Plantilla de flujo no encontrada.');
@@ -147,15 +153,18 @@ router.post(
     try {
       const { rows } = await query(
         `INSERT INTO flujo_pasos
-           (plantilla_id, orden, nombre, rol_aprobador, aprobador_id, monto_minimo, monto_maximo, obligatorio)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           (plantilla_id, orden, nombre, rol_aprobador, aprobador_id, es_jefe_directo_solicitante,
+            permite_regresar, monto_minimo, monto_maximo, obligatorio)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING *`,
         [
           plantillaId,
           orden,
           nombre,
-          rolAprobador || null,
-          aprobadorId || null,
+          esDinamico ? null : rolAprobador || null,
+          esDinamico ? null : aprobadorId || null,
+          esDinamico,
+          permiteRegresar === undefined ? true : Boolean(permiteRegresar),
           montoMinimo ?? null,
           montoMaximo ?? null,
           obligatorio === undefined ? true : Boolean(obligatorio),
@@ -177,19 +186,37 @@ router.patch(
   requireRole('super_admin', 'admin'),
   asyncHandler(async (req, res) => {
     const { id: plantillaId, pasoId } = req.params;
-    const { orden, nombre, rolAprobador, aprobadorId, montoMinimo, montoMaximo, obligatorio } = req.body || {};
+    const {
+      orden, nombre, rolAprobador, aprobadorId, esJefeDirectoSolicitante, permiteRegresar,
+      montoMinimo, montoMaximo, obligatorio,
+    } = req.body || {};
 
     if (rolAprobador !== undefined && rolAprobador !== null && !ROLES_VALIDOS.includes(rolAprobador)) {
       throw badRequest(`rolAprobador inválido. Valores permitidos: ${ROLES_VALIDOS.join(', ')}.`);
     }
+    // Si se está marcando esJefeDirectoSolicitante, rol/usuario fijo se limpian para no dejar
+    // datos inconsistentes — pero cada columna se asigna UNA sola vez en el SET (Postgres no
+    // permite "SET rol_aprobador = a, rol_aprobador = b" en la misma sentencia).
+    const esDinamico = esJefeDirectoSolicitante === true;
 
     const campos = [];
     const valores = [];
     let i = 1;
     if (orden !== undefined) { campos.push(`orden = $${i++}`); valores.push(orden); }
     if (nombre !== undefined) { campos.push(`nombre = $${i++}`); valores.push(nombre); }
-    if (rolAprobador !== undefined) { campos.push(`rol_aprobador = $${i++}`); valores.push(rolAprobador); }
-    if (aprobadorId !== undefined) { campos.push(`aprobador_id = $${i++}`); valores.push(aprobadorId); }
+    if (rolAprobador !== undefined || esJefeDirectoSolicitante !== undefined) {
+      campos.push(`rol_aprobador = $${i++}`);
+      valores.push(esDinamico ? null : rolAprobador ?? null);
+    }
+    if (aprobadorId !== undefined || esJefeDirectoSolicitante !== undefined) {
+      campos.push(`aprobador_id = $${i++}`);
+      valores.push(esDinamico ? null : aprobadorId ?? null);
+    }
+    if (esJefeDirectoSolicitante !== undefined) {
+      campos.push(`es_jefe_directo_solicitante = $${i++}`);
+      valores.push(esDinamico);
+    }
+    if (permiteRegresar !== undefined) { campos.push(`permite_regresar = $${i++}`); valores.push(Boolean(permiteRegresar)); }
     if (montoMinimo !== undefined) { campos.push(`monto_minimo = $${i++}`); valores.push(montoMinimo); }
     if (montoMaximo !== undefined) { campos.push(`monto_maximo = $${i++}`); valores.push(montoMaximo); }
     if (obligatorio !== undefined) { campos.push(`obligatorio = $${i++}`); valores.push(Boolean(obligatorio)); }

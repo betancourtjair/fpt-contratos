@@ -55,7 +55,7 @@ router.post(
   requireAuth,
   requireRole('super_admin', 'admin'),
   asyncHandler(async (req, res) => {
-    const { email, nombre, password, rol, area } = req.body || {};
+    const { email, nombre, password, rol, area, jefeDirectoId } = req.body || {};
     if (!email || !nombre || !password) {
       throw badRequest('email, nombre y password son requeridos.');
     }
@@ -67,6 +67,18 @@ router.post(
     if (rolFinal === 'super_admin' && req.usuario.rol !== 'super_admin') {
       throw badRequest('Solo un super_admin puede crear otro super_admin.');
     }
+    // Requerido desde el alta (no solo para solicitantes: cualquier persona puede algún día pedir
+    // un contrato, y así no queda en blanco por descuido). "null" explícito es una respuesta
+    // válida — significa "no tiene jefe directo" (dirección general) — lo que no se acepta es que
+    // el campo falte por completo; eso sí sería omitirlo sin querer. El flujo de autorización solo
+    // lo necesita para quien de hecho levante un contrato (ver flujoEngine.resolverJefeDirecto),
+    // pero pedirlo siempre evita tener que acordarse de completarlo después.
+    if (jefeDirectoId === undefined) {
+      throw badRequest('jefeDirectoId es requerido (usa null si esta persona no tiene jefe directo).');
+    }
+    if (jefeDirectoId !== null && typeof jefeDirectoId !== 'string') {
+      throw badRequest('jefeDirectoId debe ser el id de un usuario, o null.');
+    }
     // Por default se exige cambiar la contraseña en el primer login; el checkbox del alta
     // permite desmarcarlo (p.ej. para una cuenta de servicio).
     const debeCambiarPassword = req.body?.debeCambiarPassword !== false;
@@ -76,10 +88,10 @@ router.post(
     let usuarioCreado;
     try {
       const { rows } = await query(
-        `INSERT INTO usuarios (email, nombre, password_hash, rol, area, debe_cambiar_password)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO usuarios (email, nombre, password_hash, rol, area, jefe_directo_id, debe_cambiar_password)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING *`,
-        [String(email).toLowerCase(), nombre, passwordHash, rolFinal, area || null, debeCambiarPassword]
+        [String(email).toLowerCase(), nombre, passwordHash, rolFinal, area || null, jefeDirectoId || null, debeCambiarPassword]
       );
       usuarioCreado = rows[0];
     } catch (err) {

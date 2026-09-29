@@ -36,6 +36,7 @@ enum DecisionAprobacion {
   aprobado
   rechazado
   omitido
+  regresado // "Regresar al solicitante para corrección" — ver ContratoAprobacion.permiteRegresar
 }
 
 enum CategoriaDocumento {
@@ -54,6 +55,7 @@ model Usuario {
   passwordHash  String
   rol           RolUsuario @default(solicitante)
   area          String?
+  jefeDirectoId String?  // resuelve dinámicamente el paso "Cabeza del Área Solicitante" de sus contratos
   activo        Boolean  @default(true)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -65,6 +67,8 @@ model Usuario {
   documentosEnviadosAFirma ContratoDocumento[] @relation("DocumensoEnviadoPor")
   auditLogs            AuditLog[]
   pasosPorUsuario      FlujoPaso[]            @relation("AprobadorEspecifico")
+  jefeDirecto          Usuario?  @relation("JefeDirecto", fields: [jefeDirectoId], references: [id])
+  reportesDirectos     Usuario[] @relation("JefeDirecto")
 
   @@map("usuarios")
 }
@@ -109,6 +113,8 @@ model FlujoPaso {
   nombre              String
   rolAprobador        RolUsuario?
   aprobadorId         String?
+  esJefeDirectoSolicitante Boolean @default(false) // aprobador = jefe directo de quien levantó ESTE contrato
+  permiteRegresar     Boolean     @default(true) // false en el primer paso del diagrama acordado (jefe directo)
   montoMinimo         Decimal?    @db.Decimal(14, 2)
   montoMaximo         Decimal?    @db.Decimal(14, 2)
   obligatorio         Boolean     @default(true)
@@ -174,6 +180,7 @@ model ContratoAprobacion {
   nombrePaso    String
   aprobadorId   String?
   rolRequerido  RolUsuario?
+  permiteRegresar Boolean           @default(true) // copiado de FlujoPaso.permiteRegresar al generarse
   decision      DecisionAprobacion  @default(pendiente)
   comentarios   String?
   decididoAt    DateTime?

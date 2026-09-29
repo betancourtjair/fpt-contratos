@@ -13,7 +13,7 @@ import { formatMonto, formatFecha, formatFechaHora } from '../../utils.js';
 
 function normalizarDecision(aprobacion) {
   const d = (aprobacion.decision || '').toLowerCase();
-  if (d === 'aprobado' || d === 'rechazado' || d === 'omitido') return d;
+  if (d === 'aprobado' || d === 'rechazado' || d === 'omitido' || d === 'regresado') return d;
   return 'pendiente';
 }
 
@@ -142,6 +142,10 @@ export default function DetalleContrato() {
   const aprobaciones = contrato?.aprobaciones || [];
   const documentos = contrato?.documentos || [];
   const isBorrador = contrato?.estatus === 'borrador';
+  // 'en_revision' = el contrato fue "regresado" por un aprobador para que el solicitante lo
+  // corrija; se trata igual que borrador para efectos de poder editarlo y reenviarlo a
+  // autorización (ver POST .../enviar-autorizacion y PATCH en el backend).
+  const puedeEditarEstatus = contrato?.estatus === 'borrador' || contrato?.estatus === 'en_revision';
   const fueEnviado = !!contrato && contrato.estatus !== 'borrador';
 
   const solicitanteId =
@@ -151,8 +155,8 @@ export default function DetalleContrato() {
     contrato?.creadoPor?.id ??
     contrato?.creadoPorId;
   const esSolicitante = usuario && solicitanteId && String(solicitanteId) === String(usuario.id);
-  const puedeEnviar = isBorrador && (esSolicitante || esAdmin);
-  const puedeEditar = isBorrador && (esSolicitante || esAdmin);
+  const puedeEnviar = puedeEditarEstatus && (esSolicitante || esAdmin);
+  const puedeEditar = puedeEditarEstatus && (esSolicitante || esAdmin);
   const puedeCancelarSolicitud = ESTATUS_SOLICITUD.includes(contrato?.estatus) && (esSolicitante || esAdmin);
   const puedeCancelarContrato = ESTATUS_VIGENTE.includes(contrato?.estatus) && usuario?.rol === 'juridico';
   const esVigente = ESTATUS_VIGENTE.includes(contrato?.estatus);
@@ -227,12 +231,23 @@ export default function DetalleContrato() {
 
   async function handleDecidir(decision) {
     if (!pasoActual) return;
+    // "Regresar" exige justificar por qué se regresa, para que el solicitante sepa qué corregir
+    // (el backend también lo valida y rechaza la solicitud si comentarios viene vacío).
+    if (decision === 'regresado' && !comentarios.trim()) {
+      setAccionErr('Indica qué debe corregir el solicitante antes de regresarle el contrato.');
+      return;
+    }
     setAccionMsg('');
     setAccionErr('');
     setDecidiendo(true);
     try {
       await api.post(`/contratos/${id}/aprobaciones/${pasoActual.id}/decidir`, { decision, comentarios });
-      setAccionMsg(decision === 'aprobado' ? 'Decisión registrada: aprobado.' : 'Decisión registrada: rechazado.');
+      const mensajes = {
+        aprobado: 'Decisión registrada: aprobado.',
+        rechazado: 'Decisión registrada: rechazado.',
+        regresado: 'El contrato fue regresado al solicitante para su corrección.',
+      };
+      setAccionMsg(mensajes[decision] || 'Decisión registrada.');
       setComentarios('');
       await cargar();
     } catch (err) {
@@ -562,18 +577,30 @@ export default function DetalleContrato() {
                 <hr className="divider" />
                 <h3 style={{ fontSize: 15 }}>Tu decisión: {pasoActual?.nombrePaso}</h3>
                 <div className="field">
-                  <label htmlFor="comentarios">Comentarios</label>
+                  <label htmlFor="comentarios">
+                    Comentarios{pasoActual?.permiteRegresar !== false && ' (requeridos para regresar)'}
+                  </label>
                   <textarea
                     id="comentarios"
                     value={comentarios}
                     onChange={(e) => setComentarios(e.target.value)}
-                    placeholder="Opcional: justifica tu decisión…"
+                    placeholder="Opcional para aprobar/rechazar; explica qué corregir si regresas el contrato…"
                   />
                 </div>
                 <div style={{ display: 'flex', gap: 10 }}>
                   <button className="btn btn-success" disabled={decidiendo} onClick={() => handleDecidir('aprobado')}>
                     Aprobar
                   </button>
+                  {pasoActual?.permiteRegresar !== false && (
+                    <button
+                      className="btn btn-secondary"
+                      disabled={decidiendo}
+                      onClick={() => handleDecidir('regresado')}
+                      title="Regresa el contrato al solicitante para que lo corrija, en vez de rechazarlo."
+                    >
+                      Regresar
+                    </button>
+                  )}
                   <button className="btn btn-danger" disabled={decidiendo} onClick={() => handleDecidir('rechazado')}>
                     Rechazar
                   </button>

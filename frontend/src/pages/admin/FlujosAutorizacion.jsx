@@ -17,17 +17,19 @@ const PASO_VACIO = {
   montoMinimo: '',
   montoMaximo: '',
   obligatorio: true,
+  permiteRegresar: true,
 };
 
 function pasoAFormulario(paso) {
   return {
     nombre: paso.nombre || '',
-    tipoAprobador: paso.aprobadorId ? 'usuario' : 'rol',
+    tipoAprobador: paso.esJefeDirectoSolicitante ? 'jefe_directo' : paso.aprobadorId ? 'usuario' : 'rol',
     rolAprobador: paso.rolAprobador || 'aprobador',
     aprobadorId: paso.aprobadorId || '',
     montoMinimo: paso.montoMinimo ?? '',
     montoMaximo: paso.montoMaximo ?? '',
     obligatorio: paso.obligatorio !== false,
+    permiteRegresar: paso.permiteRegresar !== false,
   };
 }
 
@@ -52,11 +54,12 @@ function PasoForm({ valores, onChange, usuarios, onCancel, onGuardar, guardando,
           >
             <option value="rol">Por rol</option>
             <option value="usuario">Usuario específico</option>
+            <option value="jefe_directo">Jefe directo del solicitante (dinámico)</option>
           </select>
         </div>
       </div>
 
-      {valores.tipoAprobador === 'rol' ? (
+      {valores.tipoAprobador === 'rol' && (
         <div className="field">
           <label>Rol aprobador</label>
           <select
@@ -66,7 +69,8 @@ function PasoForm({ valores, onChange, usuarios, onCancel, onGuardar, guardando,
             {ROLES_APROBADOR.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
           </select>
         </div>
-      ) : (
+      )}
+      {valores.tipoAprobador === 'usuario' && (
         <div className="field">
           <label>Usuario aprobador</label>
           <select
@@ -77,6 +81,12 @@ function PasoForm({ valores, onChange, usuarios, onCancel, onGuardar, guardando,
             {usuarios.map((u) => <option key={u.id} value={u.id}>{u.nombre} ({u.email})</option>)}
           </select>
         </div>
+      )}
+      {valores.tipoAprobador === 'jefe_directo' && (
+        <p className="hint" style={{ marginTop: -4, marginBottom: 14 }}>
+          Este paso lo decide, en cada contrato, quien esté configurado como "jefe directo" de quien
+          levantó la solicitud (ver Administración → Usuarios). No aplica a un rol ni a una persona fija.
+        </p>
       )}
 
       <div className="form-row">
@@ -115,6 +125,18 @@ function PasoForm({ valores, onChange, usuarios, onCancel, onGuardar, guardando,
         <label htmlFor="obligatorio" style={{ marginBottom: 0 }}>Paso obligatorio</label>
       </div>
 
+      <div className="field checkbox-row">
+        <input
+          type="checkbox"
+          id="permite-regresar"
+          checked={valores.permiteRegresar}
+          onChange={(e) => onChange({ ...valores, permiteRegresar: e.target.checked })}
+        />
+        <label htmlFor="permite-regresar" style={{ marginBottom: 0 }}>
+          Quien decide este paso puede "Regresar al solicitante" (no solo Aprobar/Rechazar)
+        </label>
+      </div>
+
       {error && <div className="error-text" style={{ marginBottom: 10 }}>{error}</div>}
 
       <div style={{ display: 'flex', gap: 8 }}>
@@ -128,6 +150,7 @@ function PasoForm({ valores, onChange, usuarios, onCancel, onGuardar, guardando,
 }
 
 function describePaso(paso, usuarios) {
+  if (paso.esJefeDirectoSolicitante) return 'Jefe directo del solicitante (dinámico)';
   if (paso.aprobadorId) {
     const u = usuarios.find((u) => String(u.id) === String(paso.aprobadorId));
     return u ? `Usuario: ${u.nombre}` : 'Usuario específico';
@@ -288,6 +311,8 @@ export default function FlujosAutorizacion() {
       orden,
       rolAprobador: valores.tipoAprobador === 'rol' ? valores.rolAprobador : null,
       aprobadorId: valores.tipoAprobador === 'usuario' ? valores.aprobadorId : null,
+      esJefeDirectoSolicitante: valores.tipoAprobador === 'jefe_directo',
+      permiteRegresar: valores.permiteRegresar,
       montoMinimo: valores.montoMinimo === '' ? null : Number(valores.montoMinimo),
       montoMaximo: valores.montoMaximo === '' ? null : Number(valores.montoMaximo),
       obligatorio: valores.obligatorio,
@@ -499,6 +524,9 @@ export default function FlujosAutorizacion() {
                           <span className="step-order-badge">{idx + 1}</span>
                           <strong>{paso.nombre}</strong>
                           {paso.obligatorio === false && <span className="tag-pill" style={{ marginLeft: 8 }}>Opcional</span>}
+                          {paso.permiteRegresar === false && (
+                            <span className="tag-pill" style={{ marginLeft: 8 }}>No permite regresar</span>
+                          )}
                         </div>
                         <div style={{ display: 'flex', gap: 6 }}>
                           <button className="icon-btn" onClick={() => moverPaso(paso, -1)} disabled={idx === 0} title="Subir">↑</button>
