@@ -34,7 +34,7 @@ router.post(
        VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
       [req.params.locationId, leaseId || null, req.file.originalname, categoria || null, claveGuardada, req.usuario.id]
     );
-    res.status(201).json({ documento: rows[0] });
+    res.status(201).json({ documento: { ...rows[0], url: storage.getUrl(rows[0].storage_key) } });
   })
 );
 
@@ -48,7 +48,10 @@ router.get(
        WHERE ld.location_id = $1 ORDER BY ld.created_at DESC`,
       [req.params.locationId]
     );
-    res.json({ documentos: rows });
+    // `url` es la ruta estática servida por /uploads (ver server.js), sin auth — igual que los
+    // documentos de contratos (src/components/DocumentosContrato.jsx) — así un <a href> normal
+    // del frontend puede verla/descargarla sin tener que mandar el Bearer token.
+    res.json({ documentos: rows.map((d) => ({ ...d, url: storage.getUrl(d.storage_key) })) });
   })
 );
 

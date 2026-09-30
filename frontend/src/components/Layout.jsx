@@ -26,7 +26,7 @@ function cargarSeccionesAbiertas() {
   } catch {
     // localStorage no disponible (modo privado, etc.); usamos el valor por defecto.
   }
-  return { franquicias: true, administracion: true };
+  return { franquicias: true, arrendamientos: true, administracion: true };
 }
 
 function NavItem({ to, children, end }) {
@@ -108,6 +108,23 @@ export default function Layout() {
             <NavItem to="/franquicias/clubes">Clubes</NavItem>
           </SidebarSection>
         )}
+
+        <SidebarSection
+          id="arrendamientos"
+          titulo="Arrendamientos"
+          abierta={secciones.arrendamientos !== false}
+          onToggle={toggleSeccion}
+        >
+          <NavItem to="/arrendamientos" end>Dashboard</NavItem>
+          <NavItem to="/arrendamientos/ubicaciones">Ubicaciones</NavItem>
+          <NavItem to="/arrendamientos/leases">Leases</NavItem>
+          <NavItem to="/arrendamientos/rentas">Rentas</NavItem>
+          <NavItem to="/arrendamientos/eventos">Eventos</NavItem>
+          <NavItem to="/arrendamientos/tareas">Tareas</NavItem>
+          <NavItem to="/arrendamientos/contactos">Contactos</NavItem>
+          <NavItem to="/arrendamientos/brands">Brands</NavItem>
+          <NavItem to="/arrendamientos/companies">Companies</NavItem>
+        </SidebarSection>
 
         {esAdmin && (
           <SidebarSection

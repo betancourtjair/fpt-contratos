@@ -407,6 +407,20 @@ textarea { resize: vertical; min-height: 80px; }
 }
 .checkbox-row input { width: auto; }
 
+/* Módulo de Arrendamientos: agrupa los formularios largos (leases/locations, ver
+   pages/arrendamientos/CamposForm.jsx) en secciones con encabezado, sin depender de fieldset. */
+.field-group + .field-group { margin-top: 20px; }
+.field-group-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--color-border);
+}
+
 .form-actions {
   display: flex;
   gap: 10px;

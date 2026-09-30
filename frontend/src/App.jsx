@@ -15,6 +15,17 @@ import DashboardFranquicias from './pages/franquicias/DashboardFranquicias.jsx';
 import NuevaSolicitudFranquicia from './pages/franquicias/NuevaSolicitudFranquicia.jsx';
 import Clubes from './pages/franquicias/Clubes.jsx';
 import CambiarPassword from './pages/CambiarPassword.jsx';
+import DashboardArrendamientos from './pages/arrendamientos/DashboardArrendamientos.jsx';
+import Locations from './pages/arrendamientos/Locations.jsx';
+import LocationDetalle from './pages/arrendamientos/LocationDetalle.jsx';
+import Leases from './pages/arrendamientos/Leases.jsx';
+import LeaseDetalle from './pages/arrendamientos/LeaseDetalle.jsx';
+import Rentas from './pages/arrendamientos/Rentas.jsx';
+import EventsArrendamientos from './pages/arrendamientos/Events.jsx';
+import TasksArrendamientos from './pages/arrendamientos/Tasks.jsx';
+import ContactsArrendamientos from './pages/arrendamientos/Contacts.jsx';
+import BrandsArrendamientos from './pages/arrendamientos/Brands.jsx';
+import CompaniesArrendamientos from './pages/arrendamientos/Companies.jsx';
 
 // El módulo de Franquicias es exclusivo de super_admin/admin/ceo/cfo/cabeza_juridico/juridico
 // (separado del resto de Contratos/Dashboard, que sí ven otros roles).
@@ -72,6 +83,22 @@ export default function App() {
             </ProtectedRoute>
           }
         />
+
+        {/* Módulo de Arrendamientos (reemplazo de Leasecake): abierto a cualquier usuario
+            autenticado en modo lectura; las acciones de escritura se gatean dentro de cada
+            página con useAuth().esAdmin (mismo nivel que el resto de la app: super_admin/
+            admin/ceo/cfo/cabeza_juridico). */}
+        <Route path="arrendamientos" element={<DashboardArrendamientos />} />
+        <Route path="arrendamientos/ubicaciones" element={<Locations />} />
+        <Route path="arrendamientos/ubicaciones/:id" element={<LocationDetalle />} />
+        <Route path="arrendamientos/leases" element={<Leases />} />
+        <Route path="arrendamientos/leases/:id" element={<LeaseDetalle />} />
+        <Route path="arrendamientos/rentas" element={<Rentas />} />
+        <Route path="arrendamientos/eventos" element={<EventsArrendamientos />} />
+        <Route path="arrendamientos/tareas" element={<TasksArrendamientos />} />
+        <Route path="arrendamientos/contactos" element={<ContactsArrendamientos />} />
+        <Route path="arrendamientos/brands" element={<BrandsArrendamientos />} />
+        <Route path="arrendamientos/companies" element={<CompaniesArrendamientos />} />
 
         <Route
           path="admin/tipos-contrato"
