@@ -18,6 +18,7 @@ const cron = require('node-cron');
 const { revisarVencimientos } = require('../utils/vencimientos');
 const { revisarFranquicias } = require('../utils/franquicias');
 const { revisarPendientes: revisarFirmasPendientes } = require('../utils/firmaElectronica');
+const { revisarAlertasArrendamientos } = require('../utils/alertasArrendamientos');
 const documenso = require('../documensoClient');
 
 const ZONA_HORARIA = 'America/Mexico_City';
@@ -64,6 +65,23 @@ async function ejecutarRevisionSegura(origen) {
   }
 }
 
+let revisandoAlertasArrendamientos = false;
+async function ejecutarRevisionAlertasArrendamientosSegura(origen) {
+  if (revisandoAlertasArrendamientos) {
+    console.log(`[scheduler] Revisión de alertas de Arrendamientos ya en curso, se omite el disparo desde "${origen}".`);
+    return;
+  }
+  revisandoAlertasArrendamientos = true;
+  try {
+    const resumen = await revisarAlertasArrendamientos();
+    console.log(`[scheduler] Revisión de alertas de Arrendamientos (${origen}) completada: ${resumen.avisosEnviados} aviso(s) enviado(s).`);
+  } catch (err) {
+    console.error(`[scheduler] Error al revisar alertas de Arrendamientos (${origen}):`, err);
+  } finally {
+    revisandoAlertasArrendamientos = false;
+  }
+}
+
 let revisandoFirmas = false;
 async function ejecutarRevisionFirmasSegura(origen) {
   if (!documenso.configurado()) return; // integración no configurada: no hay nada que revisar
@@ -92,9 +110,13 @@ function iniciarProgramador() {
   setTimeout(() => {
     ejecutarRevisionSegura('arranque del servidor');
     ejecutarRevisionFirmasSegura('arranque del servidor');
+    ejecutarRevisionAlertasArrendamientosSegura('arranque del servidor');
   }, RETRASO_INICIAL_MS);
 
-  cron.schedule(EXPRESION_DIARIA, () => ejecutarRevisionSegura('cron diario 07:00'), {
+  cron.schedule(EXPRESION_DIARIA, () => {
+    ejecutarRevisionSegura('cron diario 07:00');
+    ejecutarRevisionAlertasArrendamientosSegura('cron diario 07:00');
+  }, {
     timezone: ZONA_HORARIA,
   });
   cron.schedule(EXPRESION_FIRMAS, () => ejecutarRevisionFirmasSegura('cron cada 2 horas'), {
@@ -102,8 +124,8 @@ function iniciarProgramador() {
   });
 
   console.log(
-    `[scheduler] Programador iniciado: revisión de vencimientos y de franquicias al arrancar y todos los días a las 07:00, ` +
-    `y revisión de firmas pendientes (Documenso) al arrancar y cada 2 horas (${ZONA_HORARIA}).`
+    `[scheduler] Programador iniciado: revisión de vencimientos, franquicias y alertas de Arrendamientos al arrancar y ` +
+    `todos los días a las 07:00, y revisión de firmas pendientes (Documenso) al arrancar y cada 2 horas (${ZONA_HORARIA}).`
   );
 }
 

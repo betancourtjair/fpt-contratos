@@ -4,6 +4,7 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const { revisarVencimientos } = require('../utils/vencimientos');
 const { revisarFranquicias } = require('../utils/franquicias');
 const { revisarPendientes: revisarFirmasPendientes } = require('../utils/firmaElectronica');
+const { revisarAlertasArrendamientos } = require('../utils/alertasArrendamientos');
 const { ROLES_NIVEL_ADMIN } = require('../utils/roles');
 
 const router = express.Router();
@@ -35,6 +36,20 @@ router.post(
   asyncHandler(async (req, res) => {
     const resumen = await revisarFirmasPendientes();
     res.json(resumen);
+  })
+);
+
+// POST /api/jobs/revisar-alertas-arrendamientos
+// Igual que arriba pero para las alertas de fechas críticas del módulo de Arrendamientos
+// (renovación, COI, vencimiento de lease) — ver src/utils/alertasArrendamientos.js. También
+// corre sola al arrancar y todos los días a las 07:00 (ver src/jobs/scheduler.js).
+router.post(
+  '/revisar-alertas-arrendamientos',
+  requireAuth,
+  requireRole(...ROLES_NIVEL_ADMIN),
+  asyncHandler(async (req, res) => {
+    const resumen = await revisarAlertasArrendamientos();
+    res.json({ resumen });
   })
 );
 

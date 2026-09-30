@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "seed": "node prisma/seed.js"
+    "seed": "node prisma/seed.js",
+    "migrate:arrendamientos": "node prisma/migrate_arrendamientos.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

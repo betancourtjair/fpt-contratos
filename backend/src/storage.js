@@ -26,7 +26,11 @@ function driverLocal() {
     async save(file) {
       const ext = path.extname(file.originalname || '') || '';
       const nombreUnico = `${crypto.randomUUID()}${ext}`;
-      const subdir = path.join('contratos', file.contratoId);
+      // carpetaBase permite reusar este mismo storage para otros módulos (p.ej.
+      // "arrendamientos" para los documentos de ubicaciones/leases) sin mezclarlos con los
+      // documentos de contratos; por default se mantiene 'contratos' para no romper llamadores
+      // existentes que no lo especifican.
+      const subdir = path.join(file.carpetaBase || 'contratos', file.contratoId);
       const destDir = path.join(UPLOADS_DIR, subdir);
       if (!fs.existsSync(destDir)) {
         fs.mkdirSync(destDir, { recursive: true });
