@@ -22,6 +22,18 @@ const documensoWebhookRoutes = require('./routes/documensoWebhook');
 const keepAliveRoutes = require('./routes/keepAlive');
 const { iniciarProgramador } = require('./jobs/scheduler');
 
+// --- Módulo de Arrendamientos (reemplazo de Leasecake) ---
+const arrendamientosBrandsRoutes = require('./routes/arrendamientos/brands');
+const arrendamientosCompaniesRoutes = require('./routes/arrendamientos/companies');
+const arrendamientosLocationsRoutes = require('./routes/arrendamientos/locations');
+const arrendamientosLeasesRoutes = require('./routes/arrendamientos/leases');
+const arrendamientosTasksRoutes = require('./routes/arrendamientos/tasks');
+const arrendamientosContactsRoutes = require('./routes/arrendamientos/contacts');
+const arrendamientosEventsRoutes = require('./routes/arrendamientos/events');
+const arrendamientosDashboardRoutes = require('./routes/arrendamientos/dashboard');
+const arrendamientosRentasRoutes = require('./routes/arrendamientos/rentas');
+const arrendamientosDocumentosRoutes = require('./routes/arrendamientos/documentos');
+
 const app = express();
 
 const corsOrigin = process.env.CORS_ORIGIN || '*';
@@ -57,6 +69,20 @@ app.use('/api/webhooks/documenso', documensoWebhookRoutes);
 // Público (sin requireAuth): lo llama un cron externo gratuito para mantener despiertos
 // este backend y Documenso mientras haya firmas pendientes. Ver src/routes/keepAlive.js.
 app.use('/api/keep-alive', keepAliveRoutes);
+
+// --- Módulo de Arrendamientos (reemplazo de Leasecake): mismo login/roles, tablas propias
+// (ver prisma/migration_arrendamientos.sql), todo bajo el prefijo /api/arrendamientos/... ---
+app.use('/api/arrendamientos/brands', arrendamientosBrandsRoutes);
+app.use('/api/arrendamientos/companies', arrendamientosCompaniesRoutes);
+app.use('/api/arrendamientos/locations', arrendamientosLocationsRoutes);
+app.use('/api/arrendamientos/leases', arrendamientosLeasesRoutes);
+app.use('/api/arrendamientos/tasks', arrendamientosTasksRoutes);
+app.use('/api/arrendamientos/contacts', arrendamientosContactsRoutes);
+app.use('/api/arrendamientos/events', arrendamientosEventsRoutes);
+app.use('/api/arrendamientos/dashboard', arrendamientosDashboardRoutes);
+app.use('/api/arrendamientos/rentas', arrendamientosRentasRoutes);
+// arrendamientosDocumentosRoutes define sus propias rutas completas (/locations/:locationId/documentos, etc.)
+app.use('/api/arrendamientos', arrendamientosDocumentosRoutes);
 
 // 404
 app.use((req, res) => {
