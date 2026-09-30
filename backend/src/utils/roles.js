@@ -13,4 +13,10 @@ const ROLES_NIVEL_ADMIN = ['super_admin', 'admin', 'ceo', 'cfo', 'cabeza_juridic
 // solicitud (ver ESTATUS_SOLICITUD).
 const ROLES_AUTORIDAD_JURIDICA = ['super_admin', 'cabeza_juridico'];
 
-module.exports = { ROLES_NIVEL_ADMIN, ROLES_AUTORIDAD_JURIDICA };
+// Quién puede ver el apartado "Rentas" del módulo de Arrendamientos (calendario de renta
+// consolidado de todas las ubicaciones): dato financiero sensible, así que se restringe a
+// Super Admin, CEO, CFO y Jurídico (Cabeza de Jurídico y Jurídico) — deliberadamente sin
+// "admin" genérico, a diferencia de ROLES_NIVEL_ADMIN.
+const ROLES_RENTAS = ['super_admin', 'ceo', 'cfo', 'cabeza_juridico', 'juridico'];
+
+module.exports = { ROLES_NIVEL_ADMIN, ROLES_AUTORIDAD_JURIDICA, ROLES_RENTAS };

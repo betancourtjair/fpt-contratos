@@ -59,7 +59,7 @@ function SidebarSection({ id, titulo, abierta, onToggle, children }) {
 }
 
 export default function Layout() {
-  const { usuario, logout, esAdmin, puedeFranquicias } = useAuth();
+  const { usuario, logout, esAdmin, puedeFranquicias, puedeVerRentas } = useAuth();
   const [secciones, setSecciones] = useState(cargarSeccionesAbiertas);
 
   function toggleSeccion(id) {
@@ -118,7 +118,7 @@ export default function Layout() {
           <NavItem to="/arrendamientos" end>Dashboard</NavItem>
           <NavItem to="/arrendamientos/ubicaciones">Ubicaciones</NavItem>
           <NavItem to="/arrendamientos/leases">Leases</NavItem>
-          <NavItem to="/arrendamientos/rentas">Rentas</NavItem>
+          {puedeVerRentas && <NavItem to="/arrendamientos/rentas">Rentas</NavItem>}
           <NavItem to="/arrendamientos/eventos">Eventos</NavItem>
           <NavItem to="/arrendamientos/tareas">Tareas</NavItem>
           <NavItem to="/arrendamientos/contactos">Contactos</NavItem>

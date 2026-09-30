@@ -62,10 +62,14 @@ export function AuthProvider({ children }) {
   const esAdmin = usuario && ['admin', 'super_admin', 'ceo', 'cfo', 'cabeza_juridico'].includes(usuario.rol);
   // Quién puede entrar al módulo de Franquicias (dashboard, nueva solicitud, clubes).
   const puedeFranquicias = usuario && ['super_admin', 'admin', 'ceo', 'cfo', 'cabeza_juridico', 'juridico'].includes(usuario.rol);
+  // Quién puede ver el apartado "Rentas" (calendario de renta consolidado de todo el
+  // portafolio): dato financiero sensible, restringido a Super Admin/CEO/CFO/Jurídico —
+  // deliberadamente sin "admin" genérico, a diferencia de esAdmin/puedeFranquicias.
+  const puedeVerRentas = usuario && ['super_admin', 'ceo', 'cfo', 'cabeza_juridico', 'juridico'].includes(usuario.rol);
 
   const value = useMemo(
-    () => ({ usuario, cargando, login, logout, esAdmin, puedeFranquicias, actualizarUsuario }),
-    [usuario, cargando, login, logout, esAdmin, puedeFranquicias, actualizarUsuario]
+    () => ({ usuario, cargando, login, logout, esAdmin, puedeFranquicias, puedeVerRentas, actualizarUsuario }),
+    [usuario, cargando, login, logout, esAdmin, puedeFranquicias, puedeVerRentas, actualizarUsuario]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

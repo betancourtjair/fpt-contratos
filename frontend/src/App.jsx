@@ -31,6 +31,11 @@ import CompaniesArrendamientos from './pages/arrendamientos/Companies.jsx';
 // (separado del resto de Contratos/Dashboard, que sí ven otros roles).
 const ROLES_FRANQUICIAS = ['super_admin', 'admin', 'ceo', 'cfo', 'cabeza_juridico', 'juridico'];
 
+// El apartado "Rentas" (dentro de Arrendamientos) expone el calendario de renta de todo el
+// portafolio, así que se restringe a Super Admin/CEO/CFO/Jurídico — a diferencia del resto del
+// módulo de Arrendamientos, que es de lectura abierta a cualquier rol autenticado.
+const ROLES_RENTAS = ['super_admin', 'ceo', 'cfo', 'cabeza_juridico', 'juridico'];
+
 export default function App() {
   return (
     <Routes>
@@ -93,7 +98,14 @@ export default function App() {
         <Route path="arrendamientos/ubicaciones/:id" element={<LocationDetalle />} />
         <Route path="arrendamientos/leases" element={<Leases />} />
         <Route path="arrendamientos/leases/:id" element={<LeaseDetalle />} />
-        <Route path="arrendamientos/rentas" element={<Rentas />} />
+        <Route
+          path="arrendamientos/rentas"
+          element={
+            <ProtectedRoute roles={ROLES_RENTAS}>
+              <Rentas />
+            </ProtectedRoute>
+          }
+        />
         <Route path="arrendamientos/eventos" element={<EventsArrendamientos />} />
         <Route path="arrendamientos/tareas" element={<TasksArrendamientos />} />
         <Route path="arrendamientos/contactos" element={<ContactsArrendamientos />} />

@@ -1,7 +1,8 @@
 const express = require('express');
 const { query } = require('../../db');
 const asyncHandler = require('../../utils/asyncHandler');
-const { requireAuth } = require('../../middleware/auth');
+const { requireAuth, requireRole } = require('../../middleware/auth');
+const { ROLES_RENTAS } = require('../../utils/roles');
 
 const router = express.Router();
 
@@ -9,6 +10,10 @@ const router = express.Router();
 // (Leasecake solo muestra este calendario dentro de cada lease; aquí se agrega en un solo
 // apartado para ver renta total por mes, por categoría, por ubicación/brand, y próximos
 // incrementos, sin tener que entrar lease por lease).
+//
+// Restringido a Super Admin/CEO/CFO/Jurídico (ROLES_RENTAS): a diferencia del resto del
+// módulo de Arrendamientos (lectura abierta a cualquier rol autenticado), este apartado
+// expone el detalle de renta de todo el portafolio.
 //
 // Query params opcionales:
 //   categoria    - filtra por categoría (Base Rent, CAM, Insurance, etc.)
@@ -18,6 +23,7 @@ const router = express.Router();
 router.get(
   '/',
   requireAuth,
+  requireRole(...ROLES_RENTAS),
   asyncHandler(async (req, res) => {
     const { categoria, locationId, brandId, vigente } = req.query;
     const condiciones = [`le.estatus = 'activo'`];
