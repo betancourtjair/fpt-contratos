@@ -13,3 +13,7 @@ frontend/.env
 # de gh-pages sí siguen versionados).
 dist/doc/
 dist/*.zip
+
+# Datos crudos extraídos de Leasecake para la migración a Arrendamientos (rentas, contactos de
+# landlord/tenant, etc.) — dato sensible de un solo uso, no pertenece al historial de git.
+backend/data_migration/
