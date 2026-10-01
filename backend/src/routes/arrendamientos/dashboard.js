@@ -23,7 +23,12 @@ router.get(
           (SELECT COUNT(*) FROM leases WHERE estatus = 'activo' AND expiration_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '180 days') AS venciendo_180_dias
       `),
       query(`
-        SELECT l.id AS location_id, l.nombre AS location_nombre, le.expiration_date, rs.start_date AS fecha_inicio_pago_renta
+        SELECT l.id AS location_id, l.nombre AS location_nombre, le.expiration_date,
+          -- Preferimos la fecha de inicio del primer renglón de "Base Rent" (más precisa si
+          -- existe), pero varios leases en Leasecake nunca tuvieron el Rent Schedule capturado
+          -- como tabla -- solo el campo "Rent Commencement Date" del lease -- así que usamos
+          -- ese como respaldo en vez de dejarlo en blanco.
+          COALESCE(rs.start_date, le.rent_commencement_date) AS fecha_inicio_pago_renta
         FROM leases le
         JOIN locations l ON l.id = le.location_id
         LEFT JOIN LATERAL (
