@@ -19,4 +19,11 @@ const ROLES_AUTORIDAD_JURIDICA = ['super_admin', 'cabeza_juridico'];
 // "admin" genérico, a diferencia de ROLES_NIVEL_ADMIN.
 const ROLES_RENTAS = ['super_admin', 'ceo', 'cfo', 'cabeza_juridico', 'juridico'];
 
-module.exports = { ROLES_NIVEL_ADMIN, ROLES_AUTORIDAD_JURIDICA, ROLES_RENTAS };
+// Quién puede entrar al módulo de Franquicias completo (dashboard, listado de contratos de
+// franquicia, catálogo de Clubes): instrucción explícita de negocio — solo Jurídico, Cabeza de
+// Jurídico, CEO y CFO deben poder ver esta sección, deliberadamente sin "admin" genérico. Se
+// mantiene "super_admin" como respaldo de sistema (acceso total a todo, igual que en el resto de
+// la app) — a diferencia de ROLES_RENTAS, aquí NO se incluye "admin".
+const ROLES_MODULO_FRANQUICIAS = ['super_admin', 'juridico', 'cabeza_juridico', 'ceo', 'cfo'];
+
+module.exports = { ROLES_NIVEL_ADMIN, ROLES_AUTORIDAD_JURIDICA, ROLES_RENTAS, ROLES_MODULO_FRANQUICIAS };

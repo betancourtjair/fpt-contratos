@@ -55,7 +55,7 @@ export default function NuevaSolicitudFranquicia() {
       <div className="page-header">
         <div>
           <h1>Nueva solicitud de franquicia</h1>
-          <p className="page-header-sub">Se creará como borrador ligado a un club. Podrás enviarlo a autorización desde el expediente.</p>
+          <p className="page-header-sub">No requiere autorización: en cuanto lo guardes, el club queda registrado.</p>
         </div>
       </div>
 
@@ -71,7 +71,7 @@ export default function NuevaSolicitudFranquicia() {
               <ContratoForm valores={valores} onChange={setValores} errores={errores} tipos={tipos} clubes={clubes} />
               <div className="form-actions">
                 <button type="submit" className="btn btn-primary" disabled={enviando}>
-                  {enviando ? 'Guardando…' : 'Guardar borrador'}
+                  {enviando ? 'Guardando…' : 'Registrar club'}
                 </button>
                 <button type="button" className="btn btn-secondary" onClick={() => navigate(-1)} disabled={enviando}>
                   Cancelar

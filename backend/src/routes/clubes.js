@@ -4,12 +4,13 @@ const asyncHandler = require('../utils/asyncHandler');
 const { badRequest, notFound, traducirErrorPostgres } = require('../utils/errors');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { registrarAuditoria } = require('../utils/audit');
-const { ROLES_NIVEL_ADMIN } = require('../utils/roles');
+const { ROLES_MODULO_FRANQUICIAS } = require('../utils/roles');
 
 const router = express.Router();
 
-// Solo estos roles administran el catálogo de clubes (dar de alta / editar / activar-desactivar).
-const ROLES_MODULO_FRANQUICIAS = [...ROLES_NIVEL_ADMIN, 'juridico'];
+// Solo estos roles (Jurídico/Cabeza de Jurídico/CEO/CFO + super_admin como respaldo, ver
+// utils/roles.js) administran el catálogo de clubes (dar de alta / editar / activar-desactivar)
+// — deliberadamente sin "admin" genérico.
 
 // GET /api/clubes - cualquier usuario autenticado puede listarlos (para llenar formularios,
 // p.ej. quien edita un contrato de franquicia ya existente que no fue creado desde el módulo).
@@ -31,7 +32,7 @@ router.get(
   })
 );
 
-// POST /api/clubes (super_admin/admin/juridico)
+// POST /api/clubes (juridico/cabeza_juridico/ceo/cfo)
 router.post(
   '/',
   requireAuth,
@@ -58,7 +59,7 @@ router.post(
   })
 );
 
-// PATCH /api/clubes/:id (super_admin/admin/juridico)
+// PATCH /api/clubes/:id (juridico/cabeza_juridico/ceo/cfo)
 router.patch(
   '/:id',
   requireAuth,

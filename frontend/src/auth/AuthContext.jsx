@@ -60,8 +60,12 @@ export function AuthProvider({ children }) {
   // sobre todo, un puesto — el flujo de autorización ya los identifica por persona fija, no por
   // rol).
   const esAdmin = usuario && ['admin', 'super_admin', 'ceo', 'cfo', 'cabeza_juridico'].includes(usuario.rol);
-  // Quién puede entrar al módulo de Franquicias (dashboard, nueva solicitud, clubes).
-  const puedeFranquicias = usuario && ['super_admin', 'admin', 'ceo', 'cfo', 'cabeza_juridico', 'juridico'].includes(usuario.rol);
+  // Quién puede entrar al módulo de Franquicias (dashboard, nueva solicitud, clubes): dato
+  // sensible por instrucción explícita de negocio, restringido a Jurídico/Cabeza de
+  // Jurídico/CEO/CFO — deliberadamente sin "admin" genérico, pero con "super_admin" como respaldo
+  // de sistema (ver ROLES_MODULO_FRANQUICIAS en backend/src/utils/roles.js, que es quien
+  // realmente lo hace cumplir).
+  const puedeFranquicias = usuario && ['super_admin', 'ceo', 'cfo', 'cabeza_juridico', 'juridico'].includes(usuario.rol);
   // Quién puede ver el apartado "Rentas" (calendario de renta consolidado de todo el
   // portafolio): dato financiero sensible, restringido a Super Admin/CEO/CFO/Jurídico —
   // deliberadamente sin "admin" genérico, a diferencia de esAdmin/puedeFranquicias.

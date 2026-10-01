@@ -22,7 +22,7 @@ const storageContratos = require('../storageContratos');
 const { condicionVisibilidad } = require('../utils/visibilidad');
 const { datosParaPlantilla, renderizarPlantilla } = require('../utils/plantillas');
 const { estatusLabel } = require('../utils/estatusLabels');
-const { ROLES_NIVEL_ADMIN, ROLES_AUTORIDAD_JURIDICA } = require('../utils/roles');
+const { ROLES_NIVEL_ADMIN, ROLES_AUTORIDAD_JURIDICA, ROLES_MODULO_FRANQUICIAS } = require('../utils/roles');
 const { sincronizarEstatusEnDocumentos } = require('../utils/documentosMetadatos');
 const documenso = require('../documensoClient');
 const firmaElectronica = require('../utils/firmaElectronica');
@@ -150,6 +150,22 @@ router.post(
       throw badRequest('titulo, tipoContratoId, parte y contraparteNombre son requeridos.');
     }
 
+    const { rows: tipoContratoRows } = await query('SELECT * FROM tipos_contrato WHERE id = $1', [tipoContratoId]);
+    const tipoContrato = tipoContratoRows[0];
+    if (!tipoContrato) throw badRequest('tipoContratoId no corresponde a un tipo de contrato válido.');
+
+    // Los contratos de franquicia se dan de alta exclusivamente desde el módulo de Franquicias
+    // (ver ROLES_MODULO_FRANQUICIAS): un usuario sin esos roles no puede crear uno ni llamando
+    // directo a este endpoint general de Contratos.
+    if (tipoContrato.es_franquicia && !ROLES_MODULO_FRANQUICIAS.includes(req.usuario.rol)) {
+      throw forbidden('Solo Jurídico, Cabeza de Jurídico, CEO, CFO o super_admin pueden dar de alta contratos de franquicia.');
+    }
+
+    // Un contrato de franquicia no pasa por el flujo de autorización (POST /:id/enviar-autorizacion
+    // nunca se invoca para estos): en cuanto se sube, el club queda registrado de una vez en
+    // estatus 'activo' — a diferencia del resto de tipos de contrato, que inician en 'borrador'.
+    const estatusInicial = tipoContrato.es_franquicia ? 'activo' : 'borrador';
+
     try {
       const contrato = await withTransaction(async (client) => {
         const folio = await generarFolio(client);
@@ -158,8 +174,8 @@ router.post(
              (folio, titulo, descripcion, tipo_contrato_id, parte, contraparte_nombre,
               contraparte_rfc, contraparte_contacto, contraparte_email, monto, moneda,
               fecha_inicio, fecha_fin, renovacion_automatica, dias_aviso_vencimiento,
-              solicitado_por_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+              solicitado_por_id, estatus)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
            RETURNING *`,
           [
             folio,
@@ -178,6 +194,7 @@ router.post(
             Boolean(body.renovacionAutomatica),
             body.diasAvisoVencimiento ?? 30,
             req.usuario.id,
+            estatusInicial,
           ]
         );
         const nuevo = rows[0];
@@ -185,7 +202,9 @@ router.post(
           contratoId: nuevo.id,
           usuarioId: req.usuario.id,
           accion: 'contrato_creado',
-          detalle: `Folio ${nuevo.folio} creado en estatus borrador.`,
+          detalle: tipoContrato.es_franquicia
+            ? `Folio ${nuevo.folio} creado como club registrado (franquicia, sin flujo de autorización).`
+            : `Folio ${nuevo.folio} creado en estatus borrador.`,
           db: client,
         });
         return nuevo;
@@ -522,20 +541,19 @@ router.put(
     const contrato = await cargarContrato(req.params.id);
     if (!contrato) throw notFound('Contrato no encontrado.');
 
-    const esDueño = contrato.solicitado_por_id === req.usuario.id;
-    // El módulo de franquicias lo administran super_admin/admin/juridico por igual, no solo
-    // quien creó el borrador (a diferencia del resto de contratos, donde solo admin/super_admin
-    // pueden editar lo de otros).
-    if (!esRolPrivilegiado(req.usuario.rol)) {
-      if (!esDueño) throw forbidden('No puedes editar los datos de franquicia de un contrato que no solicitaste.');
-      if (contrato.estatus !== 'borrador') {
-        throw forbidden('Solo se pueden editar los datos de franquicia mientras el contrato está en borrador.');
-      }
-    }
-
     const { rows: tipoRows } = await query('SELECT * FROM tipos_contrato WHERE id = $1', [contrato.tipo_contrato_id]);
     if (!tipoRows[0]?.es_franquicia) {
       throw badRequest('Este contrato no es de un tipo marcado como franquicia.');
+    }
+
+    const esDueño = contrato.solicitado_por_id === req.usuario.id;
+    // Los datos de franquicia los administra quien tenga acceso al módulo de Franquicias
+    // (ver ROLES_MODULO_FRANQUICIAS: juridico/cabeza_juridico/ceo/cfo/super_admin — ya no
+    // "admin" genérico, que quedó fuera de este módulo). Como un contrato de franquicia nace
+    // directo en 'activo' (no pasa por 'borrador'), ya no aplica aquí la excepción de "el dueño
+    // puede editar mientras está en borrador" que sigue usando el resto de los tipos de contrato.
+    if (!ROLES_MODULO_FRANQUICIAS.includes(req.usuario.rol) && !esDueño) {
+      throw forbidden('No puedes editar los datos de franquicia de un contrato que no solicitaste.');
     }
 
     const body = req.body || {};

@@ -2,14 +2,14 @@ const express = require('express');
 const { query } = require('../db');
 const asyncHandler = require('../utils/asyncHandler');
 const { requireAuth, requireRole } = require('../middleware/auth');
-const { ROLES_NIVEL_ADMIN } = require('../utils/roles');
+const { ROLES_MODULO_FRANQUICIAS } = require('../utils/roles');
 
 const router = express.Router();
 
-// Todo este módulo es exclusivo de super_admin/admin/ceo/cfo/cabeza_juridico/juridico: es un
-// espacio separado de "Contratos"/"Dashboard" general donde se administran únicamente los
-// contratos de franquicia (uno por club).
-const ROLES_MODULO_FRANQUICIAS = [...ROLES_NIVEL_ADMIN, 'juridico'];
+// Todo este módulo es exclusivo de Jurídico/Cabeza de Jurídico/CEO/CFO, más super_admin como
+// respaldo de sistema (ver ROLES_MODULO_FRANQUICIAS en utils/roles.js — deliberadamente sin
+// "admin" genérico): es un espacio separado de "Contratos"/"Dashboard" general donde se
+// administran únicamente los contratos de franquicia (uno por club).
 router.use(requireAuth, requireRole(...ROLES_MODULO_FRANQUICIAS));
 
 // GET /api/franquicias/dashboard
