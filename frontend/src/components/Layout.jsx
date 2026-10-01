@@ -26,7 +26,7 @@ function cargarSeccionesAbiertas() {
   } catch {
     // localStorage no disponible (modo privado, etc.); usamos el valor por defecto.
   }
-  return { franquicias: true, arrendamientos: true, administracion: true };
+  return { contratos: true, franquicias: true, arrendamientos: true, administracion: true };
 }
 
 function NavItem({ to, children, end }) {
@@ -87,14 +87,19 @@ export default function Layout() {
           </div>
         </div>
 
-        <nav className="sidebar-nav">
+        <SidebarSection
+          id="contratos"
+          titulo="Contratos"
+          abierta={secciones.contratos !== false}
+          onToggle={toggleSeccion}
+        >
           <NavItem to="/" end>Dashboard</NavItem>
           <NavItem to="/solicitudes">Solicitudes</NavItem>
           <NavItem to="/contratos-vigentes">Contratos vigentes</NavItem>
           <NavItem to="/archivo">Archivo</NavItem>
           <NavItem to="/busqueda">Búsqueda avanzada</NavItem>
           <NavItem to="/contratos/nueva">Nueva solicitud</NavItem>
-        </nav>
+        </SidebarSection>
 
         {puedeFranquicias && (
           <SidebarSection
