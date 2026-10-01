@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { api, unwrap, API_URL } from '../../api.js';
+import { api, unwrap } from '../../api.js';
 import Spinner from '../../components/Spinner.jsx';
 import UbicacionMapa from '../../components/UbicacionMapa.jsx';
 import { useAuth } from '../../auth/AuthContext.jsx';
@@ -8,21 +8,15 @@ import { formatFecha, formatFechaHora } from '../../utils.js';
 import CamposForm from './CamposForm.jsx';
 import { GRUPOS_LOCATION, ESTATUS_LEASE, CATEGORIAS_DOCUMENTO_LOCATION, valoresIniciales } from './campos.js';
 
-function resolverUrl(url) {
-  if (!url) return null;
-  if (/^https?:\/\//i.test(url)) return url;
-  const base = API_URL.replace(/\/api\/?$/, '');
-  return `${base}${url.startsWith('/') ? '' : '/'}${url}`;
-}
-
 export default function LocationDetalle() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { usuario, esAdmin } = useAuth();
+  const { esAdmin } = useAuth();
 
   const [location, setLocation] = useState(null);
   const [leases, setLeases] = useState([]);
   const [documentos, setDocumentos] = useState([]);
+  const [sharepointConfigurado, setSharepointConfigurado] = useState(true);
   const [comentarios, setComentarios] = useState([]);
   const [brands, setBrands] = useState([]);
   const [companies, setCompanies] = useState([]);
@@ -61,11 +55,12 @@ export default function LocationDetalle() {
       setLocation(d.location);
       setLeases(d.leases || []);
       setDocumentos(unwrap(dDocs, 'documentos') || []);
+      setSharepointConfigurado(dDocs?.sharepointConfigurado !== false);
       setComentarios(unwrap(dComs, 'comentarios') || []);
       setBrands(unwrap(db, 'brands') || []);
       setCompanies(unwrap(dc, 'companies') || []);
     } catch (err) {
-      setError(err.message || 'No se pudo cargar la ubicación.');
+      setError(err.message || 'No se pudo cargar la ubicaciÃ³n.');
     } finally {
       setCargando(false);
     }
@@ -78,16 +73,16 @@ export default function LocationDetalle() {
     companies: companies.map((c) => ({ value: c.id, label: c.nombre })),
   }), [brands, companies]);
 
-  // Agrupa los archivos por categoría (igual que Leasecake agrupa "Contrato Arrendamiento",
-  // "Deposito en Garantia", "Mantenimiento Plaza", "Renta Mensual", etc. en su pestaña Files).
-  // El orden sigue CATEGORIAS_DOCUMENTO_LOCATION; solo se muestran los grupos que sí tienen
-  // archivos, y cualquier categoría libre/antigua que no esté en el catálogo cae en su propio
-  // grupo (o en "Sin categoría" si viene vacía).
+  // Agrupa los archivos por categorÃ­a (igual que Leasecake agrupa "Contrato Arrendamiento",
+  // "Deposito en Garantia", "Mantenimiento Plaza", "Renta Mensual", etc. en su pestaÃ±a Files).
+  // El orden sigue CATEGORIAS_DOCUMENTO_LOCATION; solo se muestran los grupos que sÃ­ tienen
+  // archivos, y cualquier categorÃ­a libre/antigua que no estÃ© en el catÃ¡logo cae en su propio
+  // grupo (o en "Sin categorÃ­a" si viene vacÃ­a).
   const documentosAgrupados = useMemo(() => {
     const grupos = new Map();
     for (const cat of CATEGORIAS_DOCUMENTO_LOCATION) grupos.set(cat, []);
     for (const d of documentos) {
-      const cat = d.categoria || 'Sin categoría';
+      const cat = d.categoria || 'Sin categorÃ­a';
       if (!grupos.has(cat)) grupos.set(cat, []);
       grupos.get(cat).push(d);
     }
@@ -109,7 +104,7 @@ export default function LocationDetalle() {
       setLocation(data.location);
       setMostrarEditar(false);
     } catch (err) {
-      setErrorEditar(err.message || 'No se pudo guardar la ubicación.');
+      setErrorEditar(err.message || 'No se pudo guardar la ubicaciÃ³n.');
     } finally {
       setGuardandoEditar(false);
     }
@@ -119,7 +114,7 @@ export default function LocationDetalle() {
     e.preventDefault();
     setErrorLease('');
     if (!nuevoLease.expirationDate && nuevoLease.estatus !== 'mes_a_mes') {
-      // No es obligatorio, pero se avisa: la mayoría de los leases sí tienen vencimiento.
+      // No es obligatorio, pero se avisa: la mayorÃ­a de los leases sÃ­ tienen vencimiento.
     }
     setGuardandoLease(true);
     try {
@@ -148,6 +143,7 @@ export default function LocationDetalle() {
       setCategoriaArchivo('');
       const dDocs = await api.get(`/arrendamientos/locations/${id}/documentos`);
       setDocumentos(unwrap(dDocs, 'documentos') || []);
+      setSharepointConfigurado(dDocs?.sharepointConfigurado !== false);
     } catch (err) {
       setErrorArchivo(err.message || 'No se pudo subir el archivo.');
     } finally {
@@ -156,13 +152,19 @@ export default function LocationDetalle() {
   }
 
   async function borrarArchivo(docId) {
-    if (!window.confirm('¿Eliminar este documento?')) return;
+    if (!window.confirm('Â¿Eliminar este documento de SharePoint?')) return;
     try {
       await api.del(`/arrendamientos/documentos/${docId}`);
       setDocumentos((prev) => prev.filter((d) => d.id !== docId));
     } catch (err) {
       window.alert(err.message || 'No se pudo eliminar el documento.');
     }
+  }
+
+  function formatTamano(bytes) {
+    if (!bytes && bytes !== 0) return 'â€”';
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 
   async function enviarComentario(e) {
@@ -180,7 +182,7 @@ export default function LocationDetalle() {
     }
   }
 
-  if (cargando) return <Spinner label="Cargando ubicación…" />;
+  if (cargando) return <Spinner label="Cargando ubicaciÃ³nâ€¦" />;
   if (error) return <div className="alert alert-error">{error}</div>;
   if (!location) return null;
 
@@ -194,12 +196,12 @@ export default function LocationDetalle() {
             style={{ marginBottom: 10 }}
             onClick={() => navigate('/arrendamientos/ubicaciones')}
           >
-            ← Volver a ubicaciones
+            â† Volver a ubicaciones
           </button>
           <h1>{location.nombre}</h1>
           <p className="page-header-sub">
-            {location.brandNombre && <>{location.brandNombre} · </>}
-            {[location.city, location.state].filter(Boolean).join(', ') || 'Sin dirección registrada'}
+            {location.brandNombre && <>{location.brandNombre} Â· </>}
+            {[location.city, location.state].filter(Boolean).join(', ') || 'Sin direcciÃ³n registrada'}
           </p>
         </div>
         {esAdmin && <button className="btn btn-secondary" onClick={abrirEditar}>Editar</button>}
@@ -217,15 +219,15 @@ export default function LocationDetalle() {
 
       <div className="stat-grid">
         <div className="stat-card">
-          <div className="stat-value">{location.squareMeters ?? '—'}</div>
-          <div className="stat-label">m² totales</div>
+          <div className="stat-value">{location.squareMeters ?? 'â€”'}</div>
+          <div className="stat-label">mÂ² totales</div>
         </div>
         <div className="stat-card">
-          <div className="stat-value">{location.locationType || '—'}</div>
+          <div className="stat-value">{location.locationType || 'â€”'}</div>
           <div className="stat-label">Tipo</div>
         </div>
         <div className="stat-card">
-          <div className="stat-value">{location.companyNombre || '—'}</div>
+          <div className="stat-value">{location.companyNombre || 'â€”'}</div>
           <div className="stat-label">Company (tenant)</div>
         </div>
         <div className="stat-card">
@@ -244,7 +246,7 @@ export default function LocationDetalle() {
           )}
         </div>
         {leases.length === 0 ? (
-          <div className="empty-state">Esta ubicación no tiene leases registrados.</div>
+          <div className="empty-state">Esta ubicaciÃ³n no tiene leases registrados.</div>
         ) : (
           <div className="table-wrap">
             <table>
@@ -267,8 +269,17 @@ export default function LocationDetalle() {
       </div>
 
       <div className="card">
-        <div className="card-title">Archivos</div>
+        <div className="card-title">Archivos (SharePoint)</div>
+        <p className="muted" style={{ marginTop: -6, fontSize: 13 }}>
+          Esta lista viene directo de la carpeta de la ubicaciÃ³n en SharePoint (Ubicaciones/{location.nombre}) â€” subir o
+          eliminar aquÃ­ sube/elimina el archivo ahÃ­ mismo.
+        </p>
         {errorArchivo && <div className="alert alert-error">{errorArchivo}</div>}
+        {sharepointConfigurado === false && (
+          <div className="alert alert-error">
+            SharePoint no estÃ¡ configurado en el backend (faltan las variables MS_GRAPH_*/SHAREPOINT_*).
+          </div>
+        )}
         <form onSubmit={subirArchivo} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
           <input type="file" onChange={(e) => setArchivo(e.target.files?.[0] || null)} />
           <select
@@ -276,15 +287,15 @@ export default function LocationDetalle() {
             onChange={(e) => setCategoriaArchivo(e.target.value)}
             style={{ maxWidth: 220 }}
           >
-            <option value="">Selecciona categoría…</option>
-            {CATEGORIAS_DOCUMENTO_LOCATION.map((cat) => (
+            <option value="">Sin etiqueta (Contrato Master)</option>
+            {CATEGORIAS_DOCUMENTO_LOCATION.filter((c) => c !== 'Contrato Master').map((cat) => (
               <option key={cat} value={cat}>{cat}</option>
             ))}
           </select>
-          <button type="submit" className="btn btn-primary btn-sm" disabled={subiendo}>{subiendo ? 'Subiendo…' : 'Subir archivo'}</button>
+          <button type="submit" className="btn btn-primary btn-sm" disabled={subiendo}>{subiendo ? 'Subiendoâ€¦' : 'Subir archivo'}</button>
         </form>
         {documentos.length === 0 ? (
-          <div className="empty-state">Sin archivos subidos.</div>
+          <div className="empty-state">Sin archivos en SharePoint todavÃ­a.</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
             {documentosAgrupados.map(([categoria, items]) => (
@@ -295,15 +306,15 @@ export default function LocationDetalle() {
                 </div>
                 <div className="table-wrap">
                   <table>
-                    <thead><tr><th>Archivo</th><th>Subido por</th><th>Fecha</th><th></th></tr></thead>
+                    <thead><tr><th>Archivo</th><th>TamaÃ±o</th><th>Modificado</th><th></th></tr></thead>
                     <tbody>
                       {items.map((d) => (
                         <tr key={d.id}>
-                          <td><a href={resolverUrl(d.url)} target="_blank" rel="noreferrer">{d.nombreArchivo}</a></td>
-                          <td>{d.subidoPorNombre || '—'}</td>
-                          <td>{formatFechaHora(d.createdAt)}</td>
+                          <td><a href={d.url} target="_blank" rel="noreferrer">{d.nombre}</a></td>
+                          <td>{formatTamano(d.tamanoBytes)}</td>
+                          <td>{formatFechaHora(d.modificado)}</td>
                           <td>
-                            {(esAdmin || d.subidoPorId === usuario?.id) && (
+                            {esAdmin && (
                               <button className="icon-btn" onClick={() => borrarArchivo(d.id)}>Eliminar</button>
                             )}
                           </td>
@@ -321,7 +332,7 @@ export default function LocationDetalle() {
       <div className="card">
         <div className="card-title">Comentarios</div>
         {comentarios.length === 0 ? (
-          <div className="empty-state">Sin comentarios todavía.</div>
+          <div className="empty-state">Sin comentarios todavÃ­a.</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 }}>
             {comentarios.map((c) => (
@@ -336,7 +347,7 @@ export default function LocationDetalle() {
         <form onSubmit={enviarComentario} style={{ display: 'flex', gap: 8 }}>
           <input
             type="text"
-            placeholder="Escribe un comentario…"
+            placeholder="Escribe un comentarioâ€¦"
             value={comentario}
             onChange={(e) => setComentario(e.target.value)}
             style={{ flex: 1 }}
@@ -348,7 +359,7 @@ export default function LocationDetalle() {
       {mostrarEditar && form && (
         <div className="modal-backdrop" onClick={() => !guardandoEditar && setMostrarEditar(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Editar ubicación</h3>
+            <h3>Editar ubicaciÃ³n</h3>
             {errorEditar && <div className="alert alert-error">{errorEditar}</div>}
             <form onSubmit={guardarEdicion}>
               <CamposForm
@@ -359,7 +370,7 @@ export default function LocationDetalle() {
               />
               <div className="modal-actions">
                 <button type="button" className="btn btn-secondary" onClick={() => setMostrarEditar(false)} disabled={guardandoEditar}>Cancelar</button>
-                <button type="submit" className="btn btn-primary" disabled={guardandoEditar}>{guardandoEditar ? 'Guardando…' : 'Guardar cambios'}</button>
+                <button type="submit" className="btn btn-primary" disabled={guardandoEditar}>{guardandoEditar ? 'Guardandoâ€¦' : 'Guardar cambios'}</button>
               </div>
             </form>
           </div>
@@ -370,7 +381,7 @@ export default function LocationDetalle() {
         <div className="modal-backdrop" onClick={() => !guardandoLease && setMostrarNuevoLease(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h3>Nuevo lease</h3>
-            <p className="muted" style={{ marginTop: -6 }}>Después de crearlo, entra a su detalle para llenar el resto de los campos (fechas, renovación, landlord, renta, etc.)</p>
+            <p className="muted" style={{ marginTop: -6 }}>DespuÃ©s de crearlo, entra a su detalle para llenar el resto de los campos (fechas, renovaciÃ³n, landlord, renta, etc.)</p>
             {errorLease && <div className="alert alert-error">{errorLease}</div>}
             <form onSubmit={crearLease}>
               <div className="field">
@@ -389,7 +400,7 @@ export default function LocationDetalle() {
               </div>
               <div className="modal-actions">
                 <button type="button" className="btn btn-secondary" onClick={() => setMostrarNuevoLease(false)} disabled={guardandoLease}>Cancelar</button>
-                <button type="submit" className="btn btn-primary" disabled={guardandoLease}>{guardandoLease ? 'Creando…' : 'Crear lease'}</button>
+                <button type="submit" className="btn btn-primary" disabled={guardandoLease}>{guardandoLease ? 'Creandoâ€¦' : 'Crear lease'}</button>
               </div>
             </form>
           </div>

@@ -35,9 +35,9 @@ const MAPA_COLUMNAS = {
   locationImageUrl: 'location_image_url',
 };
 
-// La "ubicación activa" de referencia (para mostrar landlord/expiración/renta en el listado)
-// es el lease sin estatus 'cancelado' con la fecha de expiración más lejana; si no hay ninguno
-// activo se usa el más reciente que exista, para no dejar el renglón completamente vacío.
+// La "ubicaciÃ³n activa" de referencia (para mostrar landlord/expiraciÃ³n/renta en el listado)
+// es el lease sin estatus 'cancelado' con la fecha de expiraciÃ³n mÃ¡s lejana; si no hay ninguno
+// activo se usa el mÃ¡s reciente que exista, para no dejar el renglÃ³n completamente vacÃ­o.
 const SUBQUERY_LEASE_ACTIVO = `(
   SELECT le.id FROM leases le
   WHERE le.location_id = l.id
@@ -46,7 +46,7 @@ const SUBQUERY_LEASE_ACTIVO = `(
 )`;
 
 // GET /api/locations - listado combinado (igual que el "Locations report" de Leasecake):
-// ubicación + brand + company + datos del lease activo (landlord, vencimiento, renta actual).
+// ubicaciÃ³n + brand + company + datos del lease activo (landlord, vencimiento, renta actual).
 router.get(
   '/',
   requireAuth,
@@ -91,20 +91,16 @@ router.get(
       WHERE l.id = $1
     `, [req.params.id]);
     const location = rows[0];
-    if (!location) throw notFound('Ubicación no encontrada.');
+    if (!location) throw notFound('UbicaciÃ³n no encontrada.');
 
     const { rows: leases } = await query(
       `SELECT * FROM leases WHERE location_id = $1 ORDER BY (estatus = 'activo') DESC, expiration_date DESC NULLS LAST`,
       [req.params.id]
     );
-    const { rows: documentos } = await query(
-      `SELECT ld.*, u.nombre AS subido_por_nombre FROM location_documents ld
-       LEFT JOIN usuarios u ON u.id = ld.subido_por_id
-       WHERE ld.location_id = $1 ORDER BY ld.created_at DESC`,
-      [req.params.id]
-    );
+    // Los documentos de la ubicaciÃ³n ya NO se leen de location_documents: viven directo en
+    // SharePoint y se obtienen aparte con GET /locations/:id/documentos (ver documentos.js).
 
-    res.json({ location, leases, documentos });
+    res.json({ location, leases });
   })
 );
 
@@ -154,7 +150,7 @@ router.patch(
         valores.push(req.body[campo]);
       }
     }
-    if (campos.length === 0) throw badRequest('No se envió ningún campo para actualizar.');
+    if (campos.length === 0) throw badRequest('No se enviÃ³ ningÃºn campo para actualizar.');
     campos.push('updated_at = now()');
     valores.push(req.params.id);
 
@@ -163,7 +159,7 @@ router.patch(
         `UPDATE locations SET ${campos.join(', ')} WHERE id = $${i} RETURNING *`,
         valores
       );
-      if (!rows[0]) throw notFound('Ubicación no encontrada.');
+      if (!rows[0]) throw notFound('UbicaciÃ³n no encontrada.');
       res.json({ location: rows[0] });
     } catch (err) {
       const traducido = traducirErrorPostgres(err);
@@ -173,7 +169,7 @@ router.patch(
   })
 );
 
-// --- Hilo de comentarios (pestaña "Discussion") ---
+// --- Hilo de comentarios (pestaÃ±a "Discussion") ---
 
 router.get(
   '/:id/comentarios',
@@ -194,7 +190,7 @@ router.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     const comentario = ((req.body || {}).comentario || '').trim();
-    if (!comentario) throw badRequest('El comentario no puede estar vacío.');
+    if (!comentario) throw badRequest('El comentario no puede estar vacÃ­o.');
     const { rows } = await query(
       `INSERT INTO location_comments (location_id, usuario_id, comentario) VALUES ($1, $2, $3) RETURNING *`,
       [req.params.id, req.usuario.id, comentario]
