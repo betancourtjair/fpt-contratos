@@ -624,6 +624,52 @@ router.put(
 );
 
 // ---------------------------------------------------------------------------
+// POST /api/contratos/:id/registrar-club-franquicia
+// Pasa de inmediato a estatus 'activo' (club registrado) un contrato de franquicia que se haya
+// quedado en 'borrador'/'en_revision'/'en_autorizacion' — esto ya no debería pasar para
+// contratos NUEVOS (ver POST / más arriba, que los crea directo en 'activo'), pero sirve para
+// corregir contratos de franquicia dados de alta antes de ese cambio. No aplica a ningún otro
+// tipo de contrato.
+// ---------------------------------------------------------------------------
+router.post(
+  '/:id/registrar-club-franquicia',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const contrato = await cargarContrato(req.params.id);
+    if (!contrato) throw notFound('Contrato no encontrado.');
+
+    const { rows: tipoRows } = await query('SELECT * FROM tipos_contrato WHERE id = $1', [contrato.tipo_contrato_id]);
+    if (!tipoRows[0]?.es_franquicia) {
+      throw badRequest('Este contrato no es de un tipo marcado como franquicia.');
+    }
+    if (!ROLES_MODULO_FRANQUICIAS.includes(req.usuario.rol)) {
+      throw forbidden('No tienes acceso al módulo de Franquicias.');
+    }
+    if (!['borrador', 'en_revision', 'en_autorizacion'].includes(contrato.estatus)) {
+      throw conflict(`Este contrato ya no está pendiente de registrarse (estatus actual: ${contrato.estatus}).`);
+    }
+
+    const { rows } = await query(
+      `UPDATE contratos SET estatus = 'activo', paso_actual_orden = NULL, updated_at = now()
+       WHERE id = $1 RETURNING *`,
+      [contrato.id]
+    );
+    const actualizado = rows[0];
+
+    await registrarAuditoria({
+      contratoId: actualizado.id,
+      usuarioId: req.usuario.id,
+      accion: 'contrato_autorizado_y_activado',
+      detalle: 'Club registrado directamente (contrato de franquicia, sin flujo de autorización).',
+    });
+
+    await sincronizarEstatusEnDocumentos(actualizado.id, actualizado.estatus);
+
+    res.json({ contrato: actualizado });
+  })
+);
+
+// ---------------------------------------------------------------------------
 // PUT /api/contratos/:id/contraparte-detalle - datos ampliados de la contraparte (persona
 // física/moral) + administrador interno. Aplica a los tipos marcados es_nda o es_servicios;
 // el resto de tipos sigue usando solo los campos planos (contraparte_nombre, contraparte_rfc,
