@@ -87,7 +87,13 @@ export default function DashboardArrendamientos() {
                     const dias = diasRestantes(v.expirationDate);
                     return (
                       <tr key={v.leaseId}>
-                        <td>{v.locationNombre}</td>
+                        <td>
+                          {v.locationId ? (
+                            <Link to={`/arrendamientos/ubicaciones/${v.locationId}`}>{v.locationNombre}</Link>
+                          ) : (
+                            v.locationNombre
+                          )}
+                        </td>
                         <td>
                           {formatFecha(v.expirationDate)}
                           {dias !== null && (
@@ -144,7 +150,13 @@ export default function DashboardArrendamientos() {
               <tbody>
                 {fechaInicioPagoRenta.map((f, i) => (
                   <tr key={i}>
-                    <td>{f.locationNombre}</td>
+                    <td>
+                      {f.locationId ? (
+                        <Link to={`/arrendamientos/ubicaciones/${f.locationId}`}>{f.locationNombre}</Link>
+                      ) : (
+                        f.locationNombre
+                      )}
+                    </td>
                     <td>{formatFecha(f.fechaInicioPagoRenta)}</td>
                     <td>{formatFecha(f.expirationDate)}</td>
                   </tr>

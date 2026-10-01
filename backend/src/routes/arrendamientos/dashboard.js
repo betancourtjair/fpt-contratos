@@ -23,7 +23,7 @@ router.get(
           (SELECT COUNT(*) FROM leases WHERE estatus = 'activo' AND expiration_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '180 days') AS venciendo_180_dias
       `),
       query(`
-        SELECT l.nombre AS location_nombre, le.expiration_date, rs.start_date AS fecha_inicio_pago_renta
+        SELECT l.id AS location_id, l.nombre AS location_nombre, le.expiration_date, rs.start_date AS fecha_inicio_pago_renta
         FROM leases le
         JOIN locations l ON l.id = le.location_id
         LEFT JOIN LATERAL (
@@ -35,7 +35,7 @@ router.get(
         ORDER BY l.nombre ASC
       `),
       query(`
-        SELECT l.nombre AS location_nombre, le.id AS lease_id, le.expiration_date, le.renewal_notice_deadline
+        SELECT l.id AS location_id, l.nombre AS location_nombre, le.id AS lease_id, le.expiration_date, le.renewal_notice_deadline
         FROM leases le JOIN locations l ON l.id = le.location_id
         WHERE le.estatus = 'activo' AND le.expiration_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '365 days'
         ORDER BY le.expiration_date ASC

@@ -15,6 +15,24 @@ export const CATEGORIAS_RENTA = [
   'Publicidad', 'Espacio temporal de preventa', 'Other', 'Taxes',
 ];
 
+// Categorías de archivos por ubicación (pestaña "Files" de Leasecake). Se obtuvieron analizando
+// el "tipo"/"tag" real de los 567 archivos existentes en las 63 ubicaciones de Leasecake vía su
+// API (ver api/v2/locations/:id/files y api/v2/leases/:id/files) — no son una lista inventada.
+export const CATEGORIAS_DOCUMENTO_LOCATION = [
+  'Contrato Master',
+  'Convenio Modificatorio',
+  'Depósito en Garantía',
+  'Mantenimiento de Plaza',
+  'Renta Mensual',
+  'Agua',
+  'CFE (Energía Eléctrica)',
+  'Gas Natural',
+  'Estoppel / Renta Variable',
+  'Licencias',
+  'Equipo de Gimnasio',
+  'Otro',
+];
+
 export const GRUPOS_LOCATION = [
   {
     titulo: 'General',
