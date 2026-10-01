@@ -1,16 +1,16 @@
-// Documentos de cada ubicaciÃ³n (mÃ³dulo de Arrendamientos, reemplazo de la pestaÃ±a "Files" de
-// Leasecake) leÃ­dos y escritos DIRECTO en SharePoint vÃ­a Microsoft Graph â€” usa la MISMA app de
+// Documentos de cada ubicación (módulo de Arrendamientos, reemplazo de la pestaña "Files" de
+// Leasecake) leídos y escritos DIRECTO en SharePoint vía Microsoft Graph — usa la MISMA app de
 // Azure AD y el MISMO sitio (GestorContratoslegal) que ya usa sharepointStorage.js para los
-// documentos de contratos (ver ese archivo para cÃ³mo se otorgÃ³ el permiso Sites.Selected), pero
-// apuntando a la carpeta raÃ­z "Ubicaciones" en vez de <Tipo de contrato>/<Folio>/.
+// documentos de contratos (ver ese archivo para cómo se otorgó el permiso Sites.Selected), pero
+// apuntando a la carpeta raíz "Ubicaciones" en vez de <Tipo de contrato>/<Folio>/.
 //
-// A diferencia de contrato_documentos, aquÃ­ NO hay un registro en la base de datos por cada
-// archivo: los archivos ya estÃ¡n en SharePoint (se migraron a mano desde Leasecake) y SharePoint
-// es la Ãºnica fuente de verdad. Por eso este mÃ³dulo solo lista/sube/borra directo ahÃ­, sin tabla.
+// A diferencia de contrato_documentos, aquí NO hay un registro en la base de datos por cada
+// archivo: los archivos ya están en SharePoint (se migraron a mano desde Leasecake) y SharePoint
+// es la única fuente de verdad. Por eso este módulo solo lista/sube/borra directo ahí, sin tabla.
 //
 // Variables de entorno: las mismas 5 que sharepointStorage.js (MS_GRAPH_CLIENT_ID/SECRET/
 // TENANT_ID, SHAREPOINT_SITE_HOSTNAME, SHAREPOINT_SITE_PATH). Sin ellas, listar()/subir()
-// devuelven "no configurado" en vez de tronar, para no romper la pÃ¡gina si falta configurar algo.
+// devuelven "no configurado" en vez de tronar, para no romper la página si falta configurar algo.
 
 const GRAPH_BASE = 'https://graph.microsoft.com/v1.0';
 const LOGIN_BASE = 'https://login.microsoftonline.com';
@@ -76,26 +76,26 @@ async function obtenerDriveId(token) {
   return driveIdCache;
 }
 
-// Quita acentos y normaliza mayÃºsculas/espacios para poder emparejar el nombre de la ubicaciÃ³n
-// (como estÃ¡ en la base de datos, con acentos) contra el nombre de su carpeta en SharePoint
-// (subida a mano por el equipo, a veces sin acentos â€” ej. "Angelopolis" vs "AngelÃ³polis").
+// Quita acentos y normaliza mayúsculas/espacios para poder emparejar el nombre de la ubicación
+// (como está en la base de datos, con acentos) contra el nombre de su carpeta en SharePoint
+// (subida a mano por el equipo, a veces sin acentos — ej. "Angelopolis" vs "Angelópolis").
 function normalizar(nombre) {
   return String(nombre || '')
     .normalize('NFD')
-    .replace(/[Ì€-Í¯]/g, '')
+    .replace(/[̀-ͯ]/g, '')
     .toLowerCase()
     .trim();
 }
 
-// CategorÃ­a (la que se ve/elige en el front) <-> nombre real de la subcarpeta en SharePoint.
-// "Contrato Master" no tiene subcarpeta: el archivo va directo en la raÃ­z de la ubicaciÃ³n.
+// Categoría (la que se ve/elige en el front) <-> nombre real de la subcarpeta en SharePoint.
+// "Contrato Master" no tiene subcarpeta: el archivo va directo en la raíz de la ubicación.
 const CATEGORIA_A_SUBCARPETA = {
   'Convenio Modificatorio': 'Convenio Modificatorio',
-  'DepÃ³sito en GarantÃ­a': 'DepÃ³sito en GarantÃ­a',
+  'Depósito en Garantía': 'Depósito en Garantía',
   'Mantenimiento de Plaza': 'Mantenimiento de Plaza',
   'Renta Mensual': 'Renta Mensual',
   Agua: 'Agua',
-  'CFE (EnergÃ­a ElÃ©ctrica)': 'CFE (EnergÃ­a ElÃ©ctrica)',
+  'CFE (Energía Eléctrica)': 'CFE (Energía Eléctrica)',
   'Gas Natural': 'Gas Natural',
   'Estoppel / Renta Variable': 'Estoppel (Renta Variable)',
   Licencias: 'Licencias',
@@ -111,7 +111,7 @@ function categoriaDesdeSubcarpeta(nombreSubcarpeta) {
   return SUBCARPETA_A_CATEGORIA.get(normalizar(nombreSubcarpeta)) || nombreSubcarpeta;
 }
 
-// Cache de 5 min de las carpetas de ubicaciÃ³n (evita listar la raÃ­z "Ubicaciones" en cada
+// Cache de 5 min de las carpetas de ubicación (evita listar la raíz "Ubicaciones" en cada
 // request; son ~63 carpetas que casi nunca cambian de nombre).
 let carpetasCache = { expiresAt: 0, porNombreNormalizado: new Map() };
 async function obtenerCarpetaUbicacion(token, driveId, nombreUbicacion) {
@@ -153,7 +153,7 @@ function mapearArchivo(it, categoria) {
   };
 }
 
-/** Lista (recursivo, 1 nivel de subcarpetas de categorÃ­a) los documentos de una ubicaciÃ³n. */
+/** Lista (recursivo, 1 nivel de subcarpetas de categoría) los documentos de una ubicación. */
 async function listar(nombreUbicacion) {
   if (!configurado()) return { configurado: false, documentos: [] };
   const token = await obtenerToken();
@@ -239,9 +239,9 @@ async function subirArchivo(token, driveId, carpetaId, nombreArchivo, buffer) {
 }
 
 /**
- * Sube un documento a la ubicaciÃ³n. Si `categoria` es 'Contrato Master' (o viene vacÃ­a: "todo
- * documento sin etiqueta es Master de arrendamiento"), va a la raÃ­z de la carpeta de la
- * ubicaciÃ³n; cualquier otra categorÃ­a va a su subcarpeta (se crea si no existe todavÃ­a).
+ * Sube un documento a la ubicación. Si `categoria` es 'Contrato Master' (o viene vacía: "todo
+ * documento sin etiqueta es Master de arrendamiento"), va a la raíz de la carpeta de la
+ * ubicación; cualquier otra categoría va a su subcarpeta (se crea si no existe todavía).
  */
 async function subir(nombreUbicacion, categoria, nombreArchivo, buffer) {
   if (!configurado()) {

@@ -60,7 +60,7 @@ export default function LocationDetalle() {
       setBrands(unwrap(db, 'brands') || []);
       setCompanies(unwrap(dc, 'companies') || []);
     } catch (err) {
-      setError(err.message || 'No se pudo cargar la ubicaciÃ³n.');
+      setError(err.message || 'No se pudo cargar la ubicación.');
     } finally {
       setCargando(false);
     }
@@ -73,16 +73,16 @@ export default function LocationDetalle() {
     companies: companies.map((c) => ({ value: c.id, label: c.nombre })),
   }), [brands, companies]);
 
-  // Agrupa los archivos por categorÃ­a (igual que Leasecake agrupa "Contrato Arrendamiento",
-  // "Deposito en Garantia", "Mantenimiento Plaza", "Renta Mensual", etc. en su pestaÃ±a Files).
-  // El orden sigue CATEGORIAS_DOCUMENTO_LOCATION; solo se muestran los grupos que sÃ­ tienen
-  // archivos, y cualquier categorÃ­a libre/antigua que no estÃ© en el catÃ¡logo cae en su propio
-  // grupo (o en "Sin categorÃ­a" si viene vacÃ­a).
+  // Agrupa los archivos por categoría (igual que Leasecake agrupa "Contrato Arrendamiento",
+  // "Deposito en Garantia", "Mantenimiento Plaza", "Renta Mensual", etc. en su pestaña Files).
+  // El orden sigue CATEGORIAS_DOCUMENTO_LOCATION; solo se muestran los grupos que sí tienen
+  // archivos, y cualquier categoría libre/antigua que no esté en el catálogo cae en su propio
+  // grupo (o en "Sin categoría" si viene vacía).
   const documentosAgrupados = useMemo(() => {
     const grupos = new Map();
     for (const cat of CATEGORIAS_DOCUMENTO_LOCATION) grupos.set(cat, []);
     for (const d of documentos) {
-      const cat = d.categoria || 'Sin categorÃ­a';
+      const cat = d.categoria || 'Sin categoría';
       if (!grupos.has(cat)) grupos.set(cat, []);
       grupos.get(cat).push(d);
     }
@@ -104,7 +104,7 @@ export default function LocationDetalle() {
       setLocation(data.location);
       setMostrarEditar(false);
     } catch (err) {
-      setErrorEditar(err.message || 'No se pudo guardar la ubicaciÃ³n.');
+      setErrorEditar(err.message || 'No se pudo guardar la ubicación.');
     } finally {
       setGuardandoEditar(false);
     }
@@ -114,7 +114,7 @@ export default function LocationDetalle() {
     e.preventDefault();
     setErrorLease('');
     if (!nuevoLease.expirationDate && nuevoLease.estatus !== 'mes_a_mes') {
-      // No es obligatorio, pero se avisa: la mayorÃ­a de los leases sÃ­ tienen vencimiento.
+      // No es obligatorio, pero se avisa: la mayoría de los leases sí tienen vencimiento.
     }
     setGuardandoLease(true);
     try {
@@ -152,7 +152,7 @@ export default function LocationDetalle() {
   }
 
   async function borrarArchivo(docId) {
-    if (!window.confirm('Â¿Eliminar este documento de SharePoint?')) return;
+    if (!window.confirm('¿Eliminar este documento de SharePoint?')) return;
     try {
       await api.del(`/arrendamientos/documentos/${docId}`);
       setDocumentos((prev) => prev.filter((d) => d.id !== docId));
@@ -162,7 +162,7 @@ export default function LocationDetalle() {
   }
 
   function formatTamano(bytes) {
-    if (!bytes && bytes !== 0) return 'â€”';
+    if (!bytes && bytes !== 0) return '—';
     if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
@@ -182,7 +182,7 @@ export default function LocationDetalle() {
     }
   }
 
-  if (cargando) return <Spinner label="Cargando ubicaciÃ³nâ€¦" />;
+  if (cargando) return <Spinner label="Cargando ubicación…" />;
   if (error) return <div className="alert alert-error">{error}</div>;
   if (!location) return null;
 
@@ -196,12 +196,12 @@ export default function LocationDetalle() {
             style={{ marginBottom: 10 }}
             onClick={() => navigate('/arrendamientos/ubicaciones')}
           >
-            â† Volver a ubicaciones
+            ← Volver a ubicaciones
           </button>
           <h1>{location.nombre}</h1>
           <p className="page-header-sub">
-            {location.brandNombre && <>{location.brandNombre} Â· </>}
-            {[location.city, location.state].filter(Boolean).join(', ') || 'Sin direcciÃ³n registrada'}
+            {location.brandNombre && <>{location.brandNombre} · </>}
+            {[location.city, location.state].filter(Boolean).join(', ') || 'Sin dirección registrada'}
           </p>
         </div>
         {esAdmin && <button className="btn btn-secondary" onClick={abrirEditar}>Editar</button>}
@@ -219,15 +219,15 @@ export default function LocationDetalle() {
 
       <div className="stat-grid">
         <div className="stat-card">
-          <div className="stat-value">{location.squareMeters ?? 'â€”'}</div>
-          <div className="stat-label">mÂ² totales</div>
+          <div className="stat-value">{location.squareMeters ?? '—'}</div>
+          <div className="stat-label">m² totales</div>
         </div>
         <div className="stat-card">
-          <div className="stat-value">{location.locationType || 'â€”'}</div>
+          <div className="stat-value">{location.locationType || '—'}</div>
           <div className="stat-label">Tipo</div>
         </div>
         <div className="stat-card">
-          <div className="stat-value">{location.companyNombre || 'â€”'}</div>
+          <div className="stat-value">{location.companyNombre || '—'}</div>
           <div className="stat-label">Company (tenant)</div>
         </div>
         <div className="stat-card">
@@ -246,7 +246,7 @@ export default function LocationDetalle() {
           )}
         </div>
         {leases.length === 0 ? (
-          <div className="empty-state">Esta ubicaciÃ³n no tiene leases registrados.</div>
+          <div className="empty-state">Esta ubicación no tiene leases registrados.</div>
         ) : (
           <div className="table-wrap">
             <table>
@@ -271,13 +271,13 @@ export default function LocationDetalle() {
       <div className="card">
         <div className="card-title">Archivos (SharePoint)</div>
         <p className="muted" style={{ marginTop: -6, fontSize: 13 }}>
-          Esta lista viene directo de la carpeta de la ubicaciÃ³n en SharePoint (Ubicaciones/{location.nombre}) â€” subir o
-          eliminar aquÃ­ sube/elimina el archivo ahÃ­ mismo.
+          Esta lista viene directo de la carpeta de la ubicación en SharePoint (Ubicaciones/{location.nombre}) — subir o
+          eliminar aquí sube/elimina el archivo ahí mismo.
         </p>
         {errorArchivo && <div className="alert alert-error">{errorArchivo}</div>}
         {sharepointConfigurado === false && (
           <div className="alert alert-error">
-            SharePoint no estÃ¡ configurado en el backend (faltan las variables MS_GRAPH_*/SHAREPOINT_*).
+            SharePoint no está configurado en el backend (faltan las variables MS_GRAPH_*/SHAREPOINT_*).
           </div>
         )}
         <form onSubmit={subirArchivo} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
@@ -292,10 +292,10 @@ export default function LocationDetalle() {
               <option key={cat} value={cat}>{cat}</option>
             ))}
           </select>
-          <button type="submit" className="btn btn-primary btn-sm" disabled={subiendo}>{subiendo ? 'Subiendoâ€¦' : 'Subir archivo'}</button>
+          <button type="submit" className="btn btn-primary btn-sm" disabled={subiendo}>{subiendo ? 'Subiendo…' : 'Subir archivo'}</button>
         </form>
         {documentos.length === 0 ? (
-          <div className="empty-state">Sin archivos en SharePoint todavÃ­a.</div>
+          <div className="empty-state">Sin archivos en SharePoint todavía.</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
             {documentosAgrupados.map(([categoria, items]) => (
@@ -306,7 +306,7 @@ export default function LocationDetalle() {
                 </div>
                 <div className="table-wrap">
                   <table>
-                    <thead><tr><th>Archivo</th><th>TamaÃ±o</th><th>Modificado</th><th></th></tr></thead>
+                    <thead><tr><th>Archivo</th><th>Tamaño</th><th>Modificado</th><th></th></tr></thead>
                     <tbody>
                       {items.map((d) => (
                         <tr key={d.id}>
@@ -332,7 +332,7 @@ export default function LocationDetalle() {
       <div className="card">
         <div className="card-title">Comentarios</div>
         {comentarios.length === 0 ? (
-          <div className="empty-state">Sin comentarios todavÃ­a.</div>
+          <div className="empty-state">Sin comentarios todavía.</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 }}>
             {comentarios.map((c) => (
@@ -347,7 +347,7 @@ export default function LocationDetalle() {
         <form onSubmit={enviarComentario} style={{ display: 'flex', gap: 8 }}>
           <input
             type="text"
-            placeholder="Escribe un comentarioâ€¦"
+            placeholder="Escribe un comentario…"
             value={comentario}
             onChange={(e) => setComentario(e.target.value)}
             style={{ flex: 1 }}
@@ -359,7 +359,7 @@ export default function LocationDetalle() {
       {mostrarEditar && form && (
         <div className="modal-backdrop" onClick={() => !guardandoEditar && setMostrarEditar(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Editar ubicaciÃ³n</h3>
+            <h3>Editar ubicación</h3>
             {errorEditar && <div className="alert alert-error">{errorEditar}</div>}
             <form onSubmit={guardarEdicion}>
               <CamposForm
@@ -370,7 +370,7 @@ export default function LocationDetalle() {
               />
               <div className="modal-actions">
                 <button type="button" className="btn btn-secondary" onClick={() => setMostrarEditar(false)} disabled={guardandoEditar}>Cancelar</button>
-                <button type="submit" className="btn btn-primary" disabled={guardandoEditar}>{guardandoEditar ? 'Guardandoâ€¦' : 'Guardar cambios'}</button>
+                <button type="submit" className="btn btn-primary" disabled={guardandoEditar}>{guardandoEditar ? 'Guardando…' : 'Guardar cambios'}</button>
               </div>
             </form>
           </div>
@@ -381,7 +381,7 @@ export default function LocationDetalle() {
         <div className="modal-backdrop" onClick={() => !guardandoLease && setMostrarNuevoLease(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h3>Nuevo lease</h3>
-            <p className="muted" style={{ marginTop: -6 }}>DespuÃ©s de crearlo, entra a su detalle para llenar el resto de los campos (fechas, renovaciÃ³n, landlord, renta, etc.)</p>
+            <p className="muted" style={{ marginTop: -6 }}>Después de crearlo, entra a su detalle para llenar el resto de los campos (fechas, renovación, landlord, renta, etc.)</p>
             {errorLease && <div className="alert alert-error">{errorLease}</div>}
             <form onSubmit={crearLease}>
               <div className="field">
@@ -400,7 +400,7 @@ export default function LocationDetalle() {
               </div>
               <div className="modal-actions">
                 <button type="button" className="btn btn-secondary" onClick={() => setMostrarNuevoLease(false)} disabled={guardandoLease}>Cancelar</button>
-                <button type="submit" className="btn btn-primary" disabled={guardandoLease}>{guardandoLease ? 'Creandoâ€¦' : 'Crear lease'}</button>
+                <button type="submit" className="btn btn-primary" disabled={guardandoLease}>{guardandoLease ? 'Creando…' : 'Crear lease'}</button>
               </div>
             </form>
           </div>
