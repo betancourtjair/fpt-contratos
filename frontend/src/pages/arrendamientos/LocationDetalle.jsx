@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, unwrap, API_URL } from '../../api.js';
 import Spinner from '../../components/Spinner.jsx';
+import UbicacionMapa from '../../components/UbicacionMapa.jsx';
 import { useAuth } from '../../auth/AuthContext.jsx';
 import { formatFecha, formatFechaHora } from '../../utils.js';
 import CamposForm from './CamposForm.jsx';
-import { GRUPOS_LOCATION, ESTATUS_LEASE, valoresIniciales } from './campos.js';
+import { GRUPOS_LOCATION, ESTATUS_LEASE, CATEGORIAS_DOCUMENTO_LOCATION, valoresIniciales } from './campos.js';
 
 function resolverUrl(url) {
   if (!url) return null;
@@ -16,6 +17,7 @@ function resolverUrl(url) {
 
 export default function LocationDetalle() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { usuario, esAdmin } = useAuth();
 
   const [location, setLocation] = useState(null);
@@ -75,6 +77,22 @@ export default function LocationDetalle() {
     brands: brands.map((b) => ({ value: b.id, label: b.nombre })),
     companies: companies.map((c) => ({ value: c.id, label: c.nombre })),
   }), [brands, companies]);
+
+  // Agrupa los archivos por categoría (igual que Leasecake agrupa "Contrato Arrendamiento",
+  // "Deposito en Garantia", "Mantenimiento Plaza", "Renta Mensual", etc. en su pestaña Files).
+  // El orden sigue CATEGORIAS_DOCUMENTO_LOCATION; solo se muestran los grupos que sí tienen
+  // archivos, y cualquier categoría libre/antigua que no esté en el catálogo cae en su propio
+  // grupo (o en "Sin categoría" si viene vacía).
+  const documentosAgrupados = useMemo(() => {
+    const grupos = new Map();
+    for (const cat of CATEGORIAS_DOCUMENTO_LOCATION) grupos.set(cat, []);
+    for (const d of documentos) {
+      const cat = d.categoria || 'Sin categoría';
+      if (!grupos.has(cat)) grupos.set(cat, []);
+      grupos.get(cat).push(d);
+    }
+    return Array.from(grupos.entries()).filter(([, items]) => items.length > 0);
+  }, [documentos]);
 
   function abrirEditar() {
     setForm(valoresIniciales(GRUPOS_LOCATION, location));
@@ -170,6 +188,14 @@ export default function LocationDetalle() {
     <div>
       <div className="page-header">
         <div>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            style={{ marginBottom: 10 }}
+            onClick={() => navigate('/arrendamientos/ubicaciones')}
+          >
+            ← Volver a ubicaciones
+          </button>
           <h1>{location.nombre}</h1>
           <p className="page-header-sub">
             {location.brandNombre && <>{location.brandNombre} · </>}
@@ -177,6 +203,16 @@ export default function LocationDetalle() {
           </p>
         </div>
         {esAdmin && <button className="btn btn-secondary" onClick={abrirEditar}>Editar</button>}
+      </div>
+
+      <div className="card">
+        <div className="card-title">Mapa</div>
+        <UbicacionMapa
+          latitude={location.latitude}
+          longitude={location.longitude}
+          nombre={location.nombre}
+          direccion={location.fullAddress || [location.address1, location.address2, location.city, location.state].filter(Boolean).join(', ')}
+        />
       </div>
 
       <div className="stat-grid">
@@ -235,37 +271,49 @@ export default function LocationDetalle() {
         {errorArchivo && <div className="alert alert-error">{errorArchivo}</div>}
         <form onSubmit={subirArchivo} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
           <input type="file" onChange={(e) => setArchivo(e.target.files?.[0] || null)} />
-          <input
-            type="text"
-            placeholder="Categoría (opcional)"
+          <select
             value={categoriaArchivo}
             onChange={(e) => setCategoriaArchivo(e.target.value)}
             style={{ maxWidth: 220 }}
-          />
+          >
+            <option value="">Selecciona categoría…</option>
+            {CATEGORIAS_DOCUMENTO_LOCATION.map((cat) => (
+              <option key={cat} value={cat}>{cat}</option>
+            ))}
+          </select>
           <button type="submit" className="btn btn-primary btn-sm" disabled={subiendo}>{subiendo ? 'Subiendo…' : 'Subir archivo'}</button>
         </form>
         {documentos.length === 0 ? (
           <div className="empty-state">Sin archivos subidos.</div>
         ) : (
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>Archivo</th><th>Categoría</th><th>Subido por</th><th>Fecha</th><th></th></tr></thead>
-              <tbody>
-                {documentos.map((d) => (
-                  <tr key={d.id}>
-                    <td><a href={resolverUrl(d.url)} target="_blank" rel="noreferrer">{d.nombreArchivo}</a></td>
-                    <td>{d.categoria ? <span className="tag-pill">{d.categoria}</span> : '—'}</td>
-                    <td>{d.subidoPorNombre || '—'}</td>
-                    <td>{formatFechaHora(d.createdAt)}</td>
-                    <td>
-                      {(esAdmin || d.subidoPorId === usuario?.id) && (
-                        <button className="icon-btn" onClick={() => borrarArchivo(d.id)}>Eliminar</button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+            {documentosAgrupados.map(([categoria, items]) => (
+              <div key={categoria}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <strong>{categoria}</strong>
+                  <span className="tag-pill">{items.length}</span>
+                </div>
+                <div className="table-wrap">
+                  <table>
+                    <thead><tr><th>Archivo</th><th>Subido por</th><th>Fecha</th><th></th></tr></thead>
+                    <tbody>
+                      {items.map((d) => (
+                        <tr key={d.id}>
+                          <td><a href={resolverUrl(d.url)} target="_blank" rel="noreferrer">{d.nombreArchivo}</a></td>
+                          <td>{d.subidoPorNombre || '—'}</td>
+                          <td>{formatFechaHora(d.createdAt)}</td>
+                          <td>
+                            {(esAdmin || d.subidoPorId === usuario?.id) && (
+                              <button className="icon-btn" onClick={() => borrarArchivo(d.id)}>Eliminar</button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
