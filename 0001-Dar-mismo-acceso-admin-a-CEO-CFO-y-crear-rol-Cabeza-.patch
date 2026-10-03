@@ -1,0 +1,1107 @@
+From 84f59ac32f7757ed09c00c8b3274dc127b0472ed Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 29 Sep 2026 16:13:54 -0600
+Subject: [PATCH] =?UTF-8?q?Dar=20mismo=20acceso=20admin=20a=20CEO/CFO=20y?=
+ =?UTF-8?q?=20crear=20rol=20Cabeza=20de=20Jur=C3=ADdico?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- CEO, CFO y el nuevo rol Cabeza de Jurídico tienen el mismo acceso
+  administrativo que Administrador (panel de Usuarios, Flujos de
+  autorización, Tipos de contrato, franquicias/clubes, edición y
+  visibilidad de contratos). Se centralizan estos checks dispersos en
+  las nuevas constantes ROLES_NIVEL_ADMIN / ROLES_AUTORIDAD_JURIDICA
+  (backend/src/utils/roles.js).
+- Cabeza de Jurídico (asignado a Roberto Sacasa) es, junto con
+  super_admin, la única autoridad para cancelar un contrato vigente y
+  para subir el "Documento firmado manual" (antes cualquier persona
+  con rol 'juridico' podía). El rol 'juridico' normal conserva su
+  visibilidad total sobre los contratos pero ya no puede editarlos ni
+  cancelarlos.
+- Nuevo campo "Jurídico asignado" por contrato (informativo, no
+  cambia quién aprueba el flujo): solo Cabeza de Jurídico/super_admin
+  puede asignarlo vía dropdown; cualquiera que vea el contrato ve el
+  nombre asignado (detalle y listados).
+- Nuevo hilo de comentarios internos por contrato: roles de nivel
+  admin pueden comentar siempre; 'juridico' normal solo mientras la
+  solicitud sigue en borrador/en_revision/en_autorizacion.
+- Los flujos de autorización de Franchise Agreement y Arrendamiento
+  (flujo_pasos con rol_aprobador = 'juridico') se dejan sin cambios,
+  a petición explícita.
+
+Ejecutado ya en Neon (producción): ALTER TYPE rol_usuario ADD VALUE
+'cabeza_juridico', ALTER TABLE contratos ADD COLUMN
+juridico_asignado_id, CREATE TABLE contrato_comentarios, y
+actualizado el rol de Roberto Sacasa a 'cabeza_juridico'.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015Y3fuwEXGpTBMqYhbFpd3F
+---
+ backend/prisma/migration.sql                  |  39 +++++
+ backend/prisma/schema.prisma                  |  40 ++++-
+ backend/src/routes/auth.js                    |  12 +-
+ backend/src/routes/clubes.js                  |   3 +-
+ backend/src/routes/contratos.js               | 164 ++++++++++++++++--
+ backend/src/routes/documentos.js              |   3 +-
+ backend/src/routes/flujoPlantillas.js         |  11 +-
+ backend/src/routes/franquicias.js             |   9 +-
+ backend/src/routes/jobs.js                    |   5 +-
+ backend/src/routes/tiposContrato.js           |  11 +-
+ backend/src/routes/usuarios.js                |  32 ++--
+ backend/src/utils/roles.js                    |  16 ++
+ frontend/src/App.jsx                          |   6 +-
+ frontend/src/auth/AuthContext.jsx             |   7 +-
+ .../src/components/DocumentosContrato.jsx     |  11 +-
+ frontend/src/components/Layout.jsx            |   1 +
+ frontend/src/pages/admin/Usuarios.jsx         |   8 +-
+ .../src/pages/contratos/DetalleContrato.jsx   | 151 +++++++++++++++-
+ .../src/pages/contratos/ListaContratos.jsx    |   4 +-
+ 19 files changed, 463 insertions(+), 70 deletions(-)
+ create mode 100644 backend/src/utils/roles.js
+
+diff --git a/backend/prisma/migration.sql b/backend/prisma/migration.sql
+index 5274480..a14d21b 100644
+--- a/backend/prisma/migration.sql
++++ b/backend/prisma/migration.sql
+@@ -482,3 +482,42 @@ ALTER TABLE contrato_aprobaciones ADD COLUMN permite_regresar BOOLEAN NOT NULL D
+ -- misma transacción que algo que ya use el valor nuevo — si tu cliente agrupa todo en una sola
+ -- transacción, corre esta línea sola primero.
+ ALTER TYPE decision_aprobacion ADD VALUE IF NOT EXISTS 'regresado';
++
++-- sep 2026: roles CEO y CFO (Usuarios -> botón "Editar", solo Super Admin puede asignarlos).
++-- Son sobre todo un "puesto" informativo: el flujo de autorización ya identifica a estas
++-- personas por id fijo (aprobador_id en flujo_pasos), no por rol. Tienen el mismo acceso
++-- administrativo que 'admin' (ver requireRole en las rutas). OJO: igual que con 'regresado'
++-- arriba, cada ALTER TYPE ... ADD VALUE debe correr solo, no junto con otro que ya use el
++-- valor nuevo en la misma transacción.
++ALTER TYPE rol_usuario ADD VALUE IF NOT EXISTS 'ceo';
++ALTER TYPE rol_usuario ADD VALUE IF NOT EXISTS 'cfo';
++
++-- sep 2026: Cabeza de Jurídico (Roberto Sacasa) — único rol (junto a super_admin) que autoriza
++-- del lado de Jurídico: cancelar un contrato vigente y adjuntar "Documento firmado manual"
++-- (antes cualquier persona con rol 'juridico' podía). 'juridico' normal conserva la misma
++-- visibilidad de siempre sobre cualquier contrato, pero ya no puede editarlos/cancelarlos; a
++-- cambio puede comentar mientras la solicitud está en borrador/en_revision/en_autorizacion (ver
++-- ESTATUS_SOLICITUD y ROLES_AUTORIDAD_JURIDICA/ROLES_NIVEL_ADMIN en el backend). Mismo nivel de
++-- acceso administrativo que 'admin', igual que CEO/CFO arriba. OJO: como con 'ceo'/'cfo' arriba,
++-- corre esta línea sola, no junto con algo que ya use el valor nuevo en la misma transacción.
++ALTER TYPE rol_usuario ADD VALUE IF NOT EXISTS 'cabeza_juridico';
++
++-- Persona de rol "juridico" (o Cabeza de Jurídico) asignada como responsable de dar seguimiento
++-- a ESTE contrato en particular — solo informativo, no cambia quién aprueba el flujo. Solo
++-- Cabeza de Jurídico o super_admin puede fijarlo/cambiarlo (ver PATCH /api/contratos/:id/
++-- juridico-asignado); visible para cualquiera que pueda ver el contrato (GET / y GET /:id).
++ALTER TABLE contratos ADD COLUMN juridico_asignado_id UUID REFERENCES usuarios(id);
++
++-- Hilo de comentarios/notas internas sobre un contrato — distinto del comentario que ya se
++-- guarda al decidir un paso de autorización (contrato_aprobaciones.comentarios). Cualquiera que
++-- pueda ver el contrato puede leerlos; para escribir uno ver POST .../comentarios (roles de
++-- nivel admin siempre; jurídico normal solo mientras la solicitud está en borrador/en_revision/
++-- en_autorizacion).
++CREATE TABLE contrato_comentarios (
++  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
++  contrato_id UUID NOT NULL REFERENCES contratos(id) ON DELETE CASCADE,
++  usuario_id UUID NOT NULL REFERENCES usuarios(id),
++  comentario TEXT NOT NULL,
++  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
++);
++CREATE INDEX contrato_comentarios_contrato_id_idx ON contrato_comentarios(contrato_id);
+diff --git a/backend/prisma/schema.prisma b/backend/prisma/schema.prisma
+index 53a5f8e..0090bb2 100644
+--- a/backend/prisma/schema.prisma
++++ b/backend/prisma/schema.prisma
+@@ -13,6 +13,11 @@ datasource db {
+ enum RolUsuario {
+   super_admin
+   admin
++  ceo
++  cfo
++  cabeza_juridico // único que autoriza del lado de Jurídico (cancelar contrato vigente,
++                  // documento firmado manual) y el único (junto a super_admin) que puede fijar
++                  // Contrato.juridicoAsignadoId. "juridico" normal solo ve y comenta.
+   juridico
+   aprobador
+   solicitante
+@@ -62,9 +67,11 @@ model Usuario {
+ 
+   contratosSolicitados Contrato[]            @relation("SolicitadoPor")
+   contratosCancelados  Contrato[]            @relation("CanceladoPor")
++  contratosAsignadosJuridico Contrato[]      @relation("JuridicoAsignado")
+   aprobaciones         ContratoAprobacion[]   @relation("Aprobador")
+   documentosSubidos    ContratoDocumento[]    @relation("SubidoPor")
+   documentosEnviadosAFirma ContratoDocumento[] @relation("DocumensoEnviadoPor")
++  comentarios          ContratoComentario[]
+   auditLogs            AuditLog[]
+   pasosPorUsuario      FlujoPaso[]            @relation("AprobadorEspecifico")
+   jefeDirecto          Usuario?  @relation("JefeDirecto", fields: [jefeDirectoId], references: [id])
+@@ -157,21 +164,46 @@ model Contrato {
+   canceladoPorId         String?
+   motivoCancelacion      String?
+ 
++  // Persona de rol "juridico" (o Cabeza de Jurídico) asignada como responsable de dar
++  // seguimiento a ESTE contrato — solo informativo, no cambia quién aprueba el flujo. Solo
++  // Cabeza de Jurídico o super_admin puede fijarlo (ver PATCH .../juridico-asignado).
++  juridicoAsignadoId     String?
++
+   createdAt              DateTime          @default(now())
+   updatedAt              DateTime          @updatedAt
+ 
+-  tipoContrato   TipoContrato     @relation(fields: [tipoContratoId], references: [id])
+-  solicitadoPor  Usuario          @relation("SolicitadoPor", fields: [solicitadoPorId], references: [id])
+-  plantillaFlujo FlujoPlantilla?  @relation(fields: [plantillaFlujoId], references: [id])
+-  canceladoPor   Usuario?         @relation("CanceladoPor", fields: [canceladoPorId], references: [id])
++  tipoContrato    TipoContrato     @relation(fields: [tipoContratoId], references: [id])
++  solicitadoPor   Usuario          @relation("SolicitadoPor", fields: [solicitadoPorId], references: [id])
++  plantillaFlujo  FlujoPlantilla?  @relation(fields: [plantillaFlujoId], references: [id])
++  canceladoPor    Usuario?         @relation("CanceladoPor", fields: [canceladoPorId], references: [id])
++  juridicoAsignado Usuario?        @relation("JuridicoAsignado", fields: [juridicoAsignadoId], references: [id])
+ 
+   aprobaciones ContratoAprobacion[]
+   documentos   ContratoDocumento[]
++  comentarios  ContratoComentario[]
+   auditLogs    AuditLog[]
+ 
+   @@map("contratos")
+ }
+ 
++// Notas/comentarios internos sobre un contrato (distinto del comentario que ya se guarda al
++// decidir un paso de autorización, ver ContratoAprobacion.comentarios). Pensado para que
++// jurídico deje seguimiento mientras la solicitud está en revisión (ver ESTATUS_SOLICITUD en
++// routes/contratos.js) — Cabeza de Jurídico y demás roles de nivel admin pueden comentar
++// siempre.
++model ContratoComentario {
++  id         String   @id @default(uuid())
++  contratoId String
++  usuarioId  String
++  comentario String
++  createdAt  DateTime @default(now())
++
++  contrato Contrato @relation(fields: [contratoId], references: [id], onDelete: Cascade)
++  usuario  Usuario  @relation(fields: [usuarioId], references: [id])
++
++  @@map("contrato_comentarios")
++}
++
+ // Instancia de aprobación generada a partir de la plantilla al momento de enviar a autorización.
+ model ContratoAprobacion {
+   id            String              @id @default(uuid())
+diff --git a/backend/src/routes/auth.js b/backend/src/routes/auth.js
+index babd8f9..cc897a1 100644
+--- a/backend/src/routes/auth.js
++++ b/backend/src/routes/auth.js
+@@ -6,13 +6,15 @@ const asyncHandler = require('../utils/asyncHandler');
+ const { badRequest, unauthorized, traducirErrorPostgres } = require('../utils/errors');
+ const { requireAuth, requireRole } = require('../middleware/auth');
+ const { enviarCorreo } = require('../email');
++const { ROLES_NIVEL_ADMIN } = require('../utils/roles');
+ 
+ const router = express.Router();
+ 
+-const ROLES_VALIDOS = ['super_admin', 'admin', 'juridico', 'aprobador', 'solicitante', 'ceo', 'cfo', 'lectura'];
+-// Igual que en usuarios.js: CEO/CFO son un "puesto" y, como super_admin, solo un super_admin
+-// puede asignarlos (los pasos de flujo ya identifican a la persona fija por id, no por rol).
+-const ROLES_SOLO_SUPER_ADMIN = ['super_admin', 'ceo', 'cfo'];
++const ROLES_VALIDOS = ['super_admin', 'admin', 'juridico', 'cabeza_juridico', 'aprobador', 'solicitante', 'ceo', 'cfo', 'lectura'];
++// Igual que en usuarios.js: CEO/CFO/Cabeza de Jurídico son un "puesto" y, como super_admin, solo
++// un super_admin puede asignarlos (los pasos de flujo ya identifican a la persona fija por id,
++// no por rol).
++const ROLES_SOLO_SUPER_ADMIN = ['super_admin', 'ceo', 'cfo', 'cabeza_juridico'];
+ 
+ // URL del sitio para incluir en el correo de bienvenida. Configurable vía env (Render);
+ // si no se define, cae al dominio propio de FPT Contratos.
+@@ -56,7 +58,7 @@ router.post(
+ router.post(
+   '/register',
+   requireAuth,
+-  requireRole('super_admin', 'admin'),
++  requireRole(...ROLES_NIVEL_ADMIN),
+   asyncHandler(async (req, res) => {
+     const { email, nombre, password, rol, area, jefeDirectoId } = req.body || {};
+     if (!email || !nombre || !password) {
+diff --git a/backend/src/routes/clubes.js b/backend/src/routes/clubes.js
+index 74f0545..12a5520 100644
+--- a/backend/src/routes/clubes.js
++++ b/backend/src/routes/clubes.js
+@@ -4,11 +4,12 @@ const asyncHandler = require('../utils/asyncHandler');
+ const { badRequest, notFound, traducirErrorPostgres } = require('../utils/errors');
+ const { requireAuth, requireRole } = require('../middleware/auth');
+ const { registrarAuditoria } = require('../utils/audit');
++const { ROLES_NIVEL_ADMIN } = require('../utils/roles');
+ 
+ const router = express.Router();
+ 
+ // Solo estos roles administran el catálogo de clubes (dar de alta / editar / activar-desactivar).
+-const ROLES_MODULO_FRANQUICIAS = ['super_admin', 'admin', 'juridico'];
++const ROLES_MODULO_FRANQUICIAS = [...ROLES_NIVEL_ADMIN, 'juridico'];
+ 
+ // GET /api/clubes - cualquier usuario autenticado puede listarlos (para llenar formularios,
+ // p.ej. quien edita un contrato de franquicia ya existente que no fue creado desde el módulo).
+diff --git a/backend/src/routes/contratos.js b/backend/src/routes/contratos.js
+index 1c8bf7f..dcb3de1 100644
+--- a/backend/src/routes/contratos.js
++++ b/backend/src/routes/contratos.js
+@@ -22,6 +22,7 @@ const storageContratos = require('../storageContratos');
+ const { condicionVisibilidad } = require('../utils/visibilidad');
+ const { datosParaPlantilla, renderizarPlantilla } = require('../utils/plantillas');
+ const { estatusLabel } = require('../utils/estatusLabels');
++const { ROLES_NIVEL_ADMIN, ROLES_AUTORIDAD_JURIDICA } = require('../utils/roles');
+ const { sincronizarEstatusEnDocumentos } = require('../utils/documentosMetadatos');
+ const documenso = require('../documensoClient');
+ const firmaElectronica = require('../utils/firmaElectronica');
+@@ -52,8 +53,11 @@ const MAPA_COLUMNAS = {
+   diasAvisoVencimiento: 'dias_aviso_vencimiento',
+ };
+ 
++// Antes incluía 'juridico'; ahora jurídico normal solo puede VER cualquier contrato (ver
++// puedeVerContrato) pero no editarlos ni cancelarlos — esa autoridad quedó en Cabeza de
++// Jurídico (ver ROLES_AUTORIDAD_JURIDICA), que sí forma parte de ROLES_NIVEL_ADMIN.
+ function esRolPrivilegiado(rol) {
+-  return ['super_admin', 'admin', 'juridico'].includes(rol);
++  return ROLES_NIVEL_ADMIN.includes(rol);
+ }
+ 
+ // Un contrato "vigente" (autorizado/activo/por_vencer) se muestra como Firmado o Pendiente de
+@@ -120,7 +124,10 @@ async function cargarContrato(id) {
+ }
+ 
+ function puedeVerContrato(contrato, usuario, tienePendiente) {
+-  if (esRolPrivilegiado(usuario.rol) || usuario.rol === 'lectura') return true;
++  // 'juridico' (a diferencia de 'cabeza_juridico') ya no es un rol de ROLES_NIVEL_ADMIN, pero
++  // conserva la misma visibilidad de siempre (ve cualquier contrato) — solo perdió la capacidad
++  // de editar/cancelar.
++  if (esRolPrivilegiado(usuario.rol) || usuario.rol === 'lectura' || usuario.rol === 'juridico') return true;
+   if (contrato.solicitado_por_id === usuario.id) return true;
+   // Antes exigía además usuario.rol === 'aprobador', pero un paso de flujo ahora puede apuntar a
+   // una persona fija (Cabeza de Jurídico/CFO/CEO) sin importar cuál sea su rol de sistema —
+@@ -308,10 +315,12 @@ router.get(
+     const where = condiciones.length ? `WHERE ${condiciones.join(' AND ')}` : '';
+     const { rows } = await query(
+       `SELECT c.*, tc.nombre AS tipo_contrato_nombre, u.nombre AS solicitado_por_nombre,
++              ja.nombre AS juridico_asignado_nombre,
+               ${SQL_FIRMADO}
+        FROM contratos c
+        JOIN tipos_contrato tc ON tc.id = c.tipo_contrato_id
+        JOIN usuarios u ON u.id = c.solicitado_por_id
++       LEFT JOIN usuarios ja ON ja.id = c.juridico_asignado_id
+        ${where}
+        ORDER BY ${columnaOrden} ${direccionOrden} NULLS LAST`,
+       valores
+@@ -437,8 +446,20 @@ router.get(
+     );
+     const firmado = firmadoRows[0]?.firmado === true;
+ 
++    // Persona de rol "juridico" (o Cabeza de Jurídico) asignada como responsable de dar
++    // seguimiento a ESTE contrato (ver PATCH /:id/juridico-asignado más abajo) — informativo,
++    // visible para cualquiera que pueda ver el contrato.
++    let juridicoAsignado = null;
++    if (contrato.juridico_asignado_id) {
++      const { rows: jaRows } = await query(
++        'SELECT id, nombre, email FROM usuarios WHERE id = $1',
++        [contrato.juridico_asignado_id]
++      );
++      juridicoAsignado = jaRows[0] || null;
++    }
++
+     res.json({
+-      contrato: { ...contrato, tipoContrato, firmado },
++      contrato: { ...contrato, tipoContrato, firmado, juridicoAsignado },
+       aprobaciones,
+       documentos: documentosConUrl,
+       franquicia,
+@@ -865,7 +886,7 @@ router.patch(
+     if (!contrato) throw notFound('Contrato no encontrado.');
+ 
+     const esDueño = contrato.solicitado_por_id === req.usuario.id;
+-    const esAdmin = ['super_admin', 'admin'].includes(req.usuario.rol);
++    const esAdmin = ROLES_NIVEL_ADMIN.includes(req.usuario.rol);
+     if (!esAdmin) {
+       if (!esDueño) throw forbidden('No puedes editar un contrato que no solicitaste.');
+       // 'en_revision' = fue regresado por un aprobador para que el solicitante lo corrija.
+@@ -912,7 +933,7 @@ router.post(
+     if (!contrato) throw notFound('Contrato no encontrado.');
+ 
+     const esDueño = contrato.solicitado_por_id === req.usuario.id;
+-    const esAdmin = ['super_admin', 'admin'].includes(req.usuario.rol);
++    const esAdmin = ROLES_NIVEL_ADMIN.includes(req.usuario.rol);
+     if (!esDueño && !esAdmin) {
+       throw forbidden('No puedes enviar a autorización un contrato que no solicitaste.');
+     }
+@@ -1225,16 +1246,16 @@ router.post(
+ );
+ 
+ // POST /api/contratos/:id/cancelar-contrato - cancela un contrato ya vigente/activo (autorizado,
+-// activo o por vencer). A diferencia de cancelar una solicitud, esto SOLO lo puede hacer jurídico
+-// (pidió el usuario expresamente: "esto únicamente lo puede hacer jurídico"), y el motivo es
+-// obligatorio — es la única constancia de por qué se dio de baja un contrato que ya estaba en
+-// operación.
++// activo o por vencer). A diferencia de cancelar una solicitud, esto SOLO lo puede hacer Cabeza
++// de Jurídico (antes era cualquier persona con rol "juridico"; ahora es una autoridad exclusiva
++// de esa persona/rol específico — ver ROLES_AUTORIDAD_JURIDICA), y el motivo es obligatorio — es
++// la única constancia de por qué se dio de baja un contrato que ya estaba en operación.
+ router.post(
+   '/:id/cancelar-contrato',
+   requireAuth,
+   asyncHandler(async (req, res) => {
+-    if (req.usuario.rol !== 'juridico') {
+-      throw forbidden('Solo jurídico puede cancelar un contrato vigente.');
++    if (!ROLES_AUTORIDAD_JURIDICA.includes(req.usuario.rol)) {
++      throw forbidden('Solo Cabeza de Jurídico puede cancelar un contrato vigente.');
+     }
+     const contrato = await cargarContrato(req.params.id);
+     if (!contrato) throw notFound('Contrato no encontrado.');
+@@ -1261,7 +1282,7 @@ router.post(
+       contratoId: contrato.id,
+       usuarioId: req.usuario.id,
+       accion: 'contrato_cancelado',
+-      detalle: `Contrato vigente cancelado por jurídico. Motivo: ${motivo}`,
++      detalle: `Contrato vigente cancelado por Cabeza de Jurídico. Motivo: ${motivo}`,
+     });
+     await sincronizarEstatusEnDocumentos(actualizado.id, actualizado.estatus);
+ 
+@@ -1272,7 +1293,7 @@ router.post(
+         await enviarCorreo(
+           email,
+           `Contrato ${actualizado.folio} cancelado`,
+-          `<p>Tu contrato <b>${actualizado.folio} - ${actualizado.titulo}</b>, que ya estaba vigente, fue cancelado por jurídico.</p>` +
++          `<p>Tu contrato <b>${actualizado.folio} - ${actualizado.titulo}</b>, que ya estaba vigente, fue cancelado por Cabeza de Jurídico.</p>` +
+             `<p>Motivo: ${motivo}</p>`
+         );
+       }
+@@ -1284,6 +1305,114 @@ router.post(
+   })
+ );
+ 
++// ---------------------------------------------------------------------------
++// PATCH /api/contratos/:id/juridico-asignado - fija/quita quién de jurídico da seguimiento a
++// ESTE contrato en particular (solo informativo: no cambia quién aprueba el flujo). Pidió el
++// usuario expresamente que solo Cabeza de Jurídico (y super_admin) pueda llenar este dropdown;
++// cualquiera que pueda ver el contrato ve el nombre asignado (ver GET / y GET /:id arriba).
++// ---------------------------------------------------------------------------
++router.patch(
++  '/:id/juridico-asignado',
++  requireAuth,
++  asyncHandler(async (req, res) => {
++    if (!ROLES_AUTORIDAD_JURIDICA.includes(req.usuario.rol)) {
++      throw forbidden('Solo Cabeza de Jurídico o un super_admin puede asignar a jurídico en un contrato.');
++    }
++    const contrato = await cargarContrato(req.params.id);
++    if (!contrato) throw notFound('Contrato no encontrado.');
++
++    const { juridicoAsignadoId } = req.body || {};
++    if (juridicoAsignadoId !== null && juridicoAsignadoId !== undefined) {
++      const { rows: objetivoRows } = await query('SELECT id, rol FROM usuarios WHERE id = $1', [juridicoAsignadoId]);
++      const objetivo = objetivoRows[0];
++      if (!objetivo) throw badRequest('El usuario a asignar no existe.');
++      if (!['juridico', 'cabeza_juridico'].includes(objetivo.rol)) {
++        throw badRequest('Solo se puede asignar a alguien con rol Jurídico o Cabeza de Jurídico.');
++      }
++    }
++
++    const { rows } = await query(
++      `UPDATE contratos SET juridico_asignado_id = $1, updated_at = now() WHERE id = $2 RETURNING *`,
++      [juridicoAsignadoId ?? null, contrato.id]
++    );
++    res.json({ contrato: rows[0] });
++  })
++);
++
++// ---------------------------------------------------------------------------
++// Comentarios internos del contrato (distinto del comentario que ya se guarda al decidir un
++// paso de autorización — ver contrato_aprobaciones.comentarios / AutorizacionTimeline). Pensado
++// para que jurídico deje seguimiento mientras la solicitud está en revisión.
++// ---------------------------------------------------------------------------
++
++// GET /api/contratos/:id/comentarios - cualquiera que pueda ver el contrato puede leerlos.
++router.get(
++  '/:id/comentarios',
++  requireAuth,
++  asyncHandler(async (req, res) => {
++    const contrato = await cargarContrato(req.params.id);
++    if (!contrato) throw notFound('Contrato no encontrado.');
++
++    const { rows: aprobacionesResumen } = await query(
++      'SELECT aprobador_id, rol_requerido, decision, orden FROM contrato_aprobaciones WHERE contrato_id = $1',
++      [contrato.id]
++    );
++    const tienePendiente = aprobacionesResumen.some(
++      (a) =>
++        a.decision === 'pendiente' &&
++        a.orden === contrato.paso_actual_orden &&
++        (a.aprobador_id === req.usuario.id || a.rol_requerido === req.usuario.rol)
++    );
++    if (!puedeVerContrato(contrato, req.usuario, tienePendiente)) {
++      throw forbidden('No tienes acceso a este contrato.');
++    }
++
++    const { rows } = await query(
++      `SELECT cc.*, u.nombre AS usuario_nombre
++       FROM contrato_comentarios cc
++       JOIN usuarios u ON u.id = cc.usuario_id
++       WHERE cc.contrato_id = $1
++       ORDER BY cc.created_at ASC`,
++      [contrato.id]
++    );
++    res.json({ comentarios: rows });
++  })
++);
++
++// POST /api/contratos/:id/comentarios - roles de nivel admin (incluye Cabeza de Jurídico) pueden
++// comentar siempre; jurídico normal solo mientras la solicitud sigue en borrador/en_revision/
++// en_autorizacion (pidió el usuario expresamente: "únicamente para un contrato en solicitud
++// pueden agregar comentarios").
++router.post(
++  '/:id/comentarios',
++  requireAuth,
++  asyncHandler(async (req, res) => {
++    const contrato = await cargarContrato(req.params.id);
++    if (!contrato) throw notFound('Contrato no encontrado.');
++
++    const puedeComentar =
++      ROLES_NIVEL_ADMIN.includes(req.usuario.rol) ||
++      (req.usuario.rol === 'juridico' && ESTATUS_SOLICITUD.includes(contrato.estatus));
++    if (!puedeComentar) {
++      throw forbidden(
++        req.usuario.rol === 'juridico'
++          ? 'Solo puedes comentar mientras la solicitud está en borrador, revisión o autorización.'
++          : 'No tienes permiso para comentar en este contrato.'
++      );
++    }
++
++    const comentario = ((req.body || {}).comentario || '').trim();
++    if (!comentario) throw badRequest('El comentario no puede estar vacío.');
++
++    const { rows } = await query(
++      `INSERT INTO contrato_comentarios (contrato_id, usuario_id, comentario)
++       VALUES ($1, $2, $3) RETURNING *`,
++      [contrato.id, req.usuario.id, comentario]
++    );
++    res.status(201).json({ comentario: { ...rows[0], usuario_nombre: req.usuario.nombre } });
++  })
++);
++
+ // ---------------------------------------------------------------------------
+ // Documentos anidados bajo contrato
+ // ---------------------------------------------------------------------------
+@@ -1309,11 +1438,12 @@ router.post(
+     }
+     // "Documento firmado manual": para contratos con firma física (no vía Documenso). A
+     // diferencia de "version_firmada" (que cualquiera con acceso al expediente puede marcar, sin
+-    // que eso pruebe nada por sí solo), esta categoría es una atestación de que jurídico ya
+-    // verificó las firmas físicas — por eso solo jurídico puede subirla. También cuenta para que
++    // que eso pruebe nada por sí solo), esta categoría es una atestación de que Cabeza de
++    // Jurídico ya verificó las firmas físicas — por eso solo esa persona/rol puede subirla (antes
++    // era cualquiera con rol "juridico" — ver ROLES_AUTORIDAD_JURIDICA). También cuenta para que
+     // el contrato se muestre como "Firmado" en Contratos vigentes (ver GET /contratos más abajo).
+-    if (categoria === 'firmado_manual' && req.usuario.rol !== 'juridico') {
+-      throw forbidden('Solo jurídico puede adjuntar un documento firmado manual.');
++    if (categoria === 'firmado_manual' && !ROLES_AUTORIDAD_JURIDICA.includes(req.usuario.rol)) {
++      throw forbidden('Solo Cabeza de Jurídico puede adjuntar un documento firmado manual.');
+     }
+     // Etiqueta libre para el checklist de documentos con nombre específico que piden NDA y
+     // servicios (ej. "escritura_constitutiva", "repse"; ver DOCUMENTOS_REQUERIDOS en
+diff --git a/backend/src/routes/documentos.js b/backend/src/routes/documentos.js
+index 97c6882..cc0de5d 100644
+--- a/backend/src/routes/documentos.js
++++ b/backend/src/routes/documentos.js
+@@ -5,6 +5,7 @@ const { notFound, forbidden, badRequest } = require('../utils/errors');
+ const { requireAuth } = require('../middleware/auth');
+ const { registrarAuditoria } = require('../utils/audit');
+ const storage = require('../storage');
++const { ROLES_NIVEL_ADMIN } = require('../utils/roles');
+ 
+ const router = express.Router();
+ 
+@@ -22,7 +23,7 @@ router.delete(
+     const documento = rows[0];
+     if (!documento) throw notFound('Documento no encontrado.');
+ 
+-    const esAdmin = ['super_admin', 'admin'].includes(req.usuario.rol);
++    const esAdmin = ROLES_NIVEL_ADMIN.includes(req.usuario.rol);
+     const esQuienSubio = documento.subido_por_id === req.usuario.id;
+     if (!esAdmin && !esQuienSubio) {
+       throw forbidden('Solo un admin/super_admin o quien subió el documento puede eliminarlo.');
+diff --git a/backend/src/routes/flujoPlantillas.js b/backend/src/routes/flujoPlantillas.js
+index b4c4ec0..e04eb0d 100644
+--- a/backend/src/routes/flujoPlantillas.js
++++ b/backend/src/routes/flujoPlantillas.js
+@@ -3,6 +3,7 @@ const { query } = require('../db');
+ const asyncHandler = require('../utils/asyncHandler');
+ const { badRequest, notFound, traducirErrorPostgres } = require('../utils/errors');
+ const { requireAuth, requireRole } = require('../middleware/auth');
++const { ROLES_NIVEL_ADMIN } = require('../utils/roles');
+ 
+ const router = express.Router();
+ const ROLES_VALIDOS = ['super_admin', 'admin', 'juridico', 'aprobador', 'solicitante', 'lectura'];
+@@ -43,7 +44,7 @@ router.get(
+ router.post(
+   '/',
+   requireAuth,
+-  requireRole('super_admin', 'admin'),
++  requireRole(...ROLES_NIVEL_ADMIN),
+   asyncHandler(async (req, res) => {
+     const { nombre, tipoContratoId, activo } = req.body || {};
+     if (!nombre) throw badRequest('nombre es requerido.');
+@@ -66,7 +67,7 @@ router.post(
+ router.patch(
+   '/:id',
+   requireAuth,
+-  requireRole('super_admin', 'admin'),
++  requireRole(...ROLES_NIVEL_ADMIN),
+   asyncHandler(async (req, res) => {
+     const { id } = req.params;
+     const { nombre, tipoContratoId, activo } = req.body || {};
+@@ -135,7 +136,7 @@ function validarPaso(body) {
+ router.post(
+   '/:id/pasos',
+   requireAuth,
+-  requireRole('super_admin', 'admin'),
++  requireRole(...ROLES_NIVEL_ADMIN),
+   asyncHandler(async (req, res) => {
+     const { id: plantillaId } = req.params;
+     validarPaso(req.body);
+@@ -183,7 +184,7 @@ router.post(
+ router.patch(
+   '/:id/pasos/:pasoId',
+   requireAuth,
+-  requireRole('super_admin', 'admin'),
++  requireRole(...ROLES_NIVEL_ADMIN),
+   asyncHandler(async (req, res) => {
+     const { id: plantillaId, pasoId } = req.params;
+     const {
+@@ -243,7 +244,7 @@ router.patch(
+ router.delete(
+   '/:id/pasos/:pasoId',
+   requireAuth,
+-  requireRole('super_admin', 'admin'),
++  requireRole(...ROLES_NIVEL_ADMIN),
+   asyncHandler(async (req, res) => {
+     const { id: plantillaId, pasoId } = req.params;
+     const { rows } = await query(
+diff --git a/backend/src/routes/franquicias.js b/backend/src/routes/franquicias.js
+index 8884a99..4a05168 100644
+--- a/backend/src/routes/franquicias.js
++++ b/backend/src/routes/franquicias.js
+@@ -2,13 +2,14 @@ const express = require('express');
+ const { query } = require('../db');
+ const asyncHandler = require('../utils/asyncHandler');
+ const { requireAuth, requireRole } = require('../middleware/auth');
++const { ROLES_NIVEL_ADMIN } = require('../utils/roles');
+ 
+ const router = express.Router();
+ 
+-// Todo este módulo es exclusivo de super_admin/admin/juridico: es un espacio separado de
+-// "Contratos"/"Dashboard" general donde se administran únicamente los contratos de
+-// franquicia (uno por club).
+-const ROLES_MODULO_FRANQUICIAS = ['super_admin', 'admin', 'juridico'];
++// Todo este módulo es exclusivo de super_admin/admin/ceo/cfo/cabeza_juridico/juridico: es un
++// espacio separado de "Contratos"/"Dashboard" general donde se administran únicamente los
++// contratos de franquicia (uno por club).
++const ROLES_MODULO_FRANQUICIAS = [...ROLES_NIVEL_ADMIN, 'juridico'];
+ router.use(requireAuth, requireRole(...ROLES_MODULO_FRANQUICIAS));
+ 
+ // GET /api/franquicias/dashboard
+diff --git a/backend/src/routes/jobs.js b/backend/src/routes/jobs.js
+index 5e33c1d..f86a7cb 100644
+--- a/backend/src/routes/jobs.js
++++ b/backend/src/routes/jobs.js
+@@ -4,6 +4,7 @@ const { requireAuth, requireRole } = require('../middleware/auth');
+ const { revisarVencimientos } = require('../utils/vencimientos');
+ const { revisarFranquicias } = require('../utils/franquicias');
+ const { revisarPendientes: revisarFirmasPendientes } = require('../utils/firmaElectronica');
++const { ROLES_NIVEL_ADMIN } = require('../utils/roles');
+ 
+ const router = express.Router();
+ 
+@@ -15,7 +16,7 @@ const router = express.Router();
+ router.post(
+   '/revisar-vencimientos',
+   requireAuth,
+-  requireRole('super_admin', 'admin'),
++  requireRole(...ROLES_NIVEL_ADMIN),
+   asyncHandler(async (req, res) => {
+     const vencimientos = await revisarVencimientos();
+     const franquicias = await revisarFranquicias();
+@@ -30,7 +31,7 @@ router.post(
+ router.post(
+   '/revisar-firmas-pendientes',
+   requireAuth,
+-  requireRole('super_admin', 'admin'),
++  requireRole(...ROLES_NIVEL_ADMIN),
+   asyncHandler(async (req, res) => {
+     const resumen = await revisarFirmasPendientes();
+     res.json(resumen);
+diff --git a/backend/src/routes/tiposContrato.js b/backend/src/routes/tiposContrato.js
+index af75b56..3faf662 100644
+--- a/backend/src/routes/tiposContrato.js
++++ b/backend/src/routes/tiposContrato.js
+@@ -7,6 +7,7 @@ const { requireAuth, requireRole } = require('../middleware/auth');
+ const { registrarAuditoria } = require('../utils/audit');
+ const storage = require('../storage');
+ const { LLAVES_PLANTILLA } = require('../utils/plantillas');
++const { ROLES_NIVEL_ADMIN } = require('../utils/roles');
+ 
+ const router = express.Router();
+ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+@@ -42,7 +43,7 @@ router.get(
+ router.post(
+   '/',
+   requireAuth,
+-  requireRole('super_admin', 'admin'),
++  requireRole(...ROLES_NIVEL_ADMIN),
+   asyncHandler(async (req, res) => {
+     const { nombre, descripcion, esFranquicia, esNda, esServicios } = req.body || {};
+     if (!nombre) throw badRequest('nombre es requerido.');
+@@ -65,7 +66,7 @@ router.post(
+ router.patch(
+   '/:id',
+   requireAuth,
+-  requireRole('super_admin', 'admin'),
++  requireRole(...ROLES_NIVEL_ADMIN),
+   asyncHandler(async (req, res) => {
+     const { id } = req.params;
+     const { nombre, descripcion, activo, esFranquicia, esNda, esServicios } = req.body || {};
+@@ -108,7 +109,7 @@ router.patch(
+ router.delete(
+   '/:id',
+   requireAuth,
+-  requireRole('super_admin', 'admin'),
++  requireRole(...ROLES_NIVEL_ADMIN),
+   asyncHandler(async (req, res) => {
+     const { id } = req.params;
+     try {
+@@ -144,7 +145,7 @@ router.delete(
+ router.post(
+   '/:id/plantilla',
+   requireAuth,
+-  requireRole('super_admin', 'admin'),
++  requireRole(...ROLES_NIVEL_ADMIN),
+   upload.single('archivo'),
+   asyncHandler(async (req, res) => {
+     const { id } = req.params;
+@@ -194,7 +195,7 @@ router.post(
+ router.delete(
+   '/:id/plantilla',
+   requireAuth,
+-  requireRole('super_admin', 'admin'),
++  requireRole(...ROLES_NIVEL_ADMIN),
+   asyncHandler(async (req, res) => {
+     const { id } = req.params;
+     const { rows } = await query('DELETE FROM plantillas_tipo_contrato WHERE tipo_contrato_id = $1 RETURNING *', [id]);
+diff --git a/backend/src/routes/usuarios.js b/backend/src/routes/usuarios.js
+index 281900c..e2c26e1 100644
+--- a/backend/src/routes/usuarios.js
++++ b/backend/src/routes/usuarios.js
+@@ -5,13 +5,14 @@ const asyncHandler = require('../utils/asyncHandler');
+ const { badRequest, forbidden, notFound, traducirErrorPostgres } = require('../utils/errors');
+ const { requireAuth, requireRole } = require('../middleware/auth');
+ const { enviarCorreo } = require('../email');
++const { ROLES_NIVEL_ADMIN } = require('../utils/roles');
+ 
+ const router = express.Router();
+-const ROLES_VALIDOS = ['super_admin', 'admin', 'juridico', 'aprobador', 'solicitante', 'ceo', 'cfo', 'lectura'];
+-// CEO y CFO son, sobre todo, un "puesto" informativo (los pasos de flujo ya los referencian
+-// como personas fijas vía aprobador_id, no por rol); pero como cualquier otro rol elevado,
+-// solo un super_admin puede asignarlos — igual que super_admin.
+-const ROLES_SOLO_SUPER_ADMIN = ['super_admin', 'ceo', 'cfo'];
++const ROLES_VALIDOS = ['super_admin', 'admin', 'juridico', 'cabeza_juridico', 'aprobador', 'solicitante', 'ceo', 'cfo', 'lectura'];
++// CEO, CFO y Cabeza de Jurídico son, sobre todo, un "puesto" informativo (los pasos de flujo ya
++// los referencian como personas fijas vía aprobador_id, no por rol); pero como cualquier otro rol
++// elevado, solo un super_admin puede asignarlos — igual que super_admin.
++const ROLES_SOLO_SUPER_ADMIN = ['super_admin', 'ceo', 'cfo', 'cabeza_juridico'];
+ 
+ function serializarUsuario(row) {
+   if (!row) return null;
+@@ -23,7 +24,7 @@ function serializarUsuario(row) {
+ router.get(
+   '/',
+   requireAuth,
+-  requireRole('super_admin', 'admin'),
++  requireRole(...ROLES_NIVEL_ADMIN),
+   asyncHandler(async (req, res) => {
+     const { rows } = await query('SELECT * FROM usuarios ORDER BY nombre ASC');
+     res.json({ usuarios: rows.map(serializarUsuario) });
+@@ -34,13 +35,24 @@ router.get(
+ // A diferencia de GET / (arriba, solo admin+), cualquier usuario autenticado puede consultarla:
+ // no expone rol, area ni ningun otro dato del usuario. Pensada para autocompletar firmantes
+ // internos al enviar un documento a firma (ver EnviarAFirmarModal.jsx en el frontend).
++// Query opcional "rol": filtra por uno o más roles separados por coma (p.ej. "juridico" o
++// "juridico,cabeza_juridico") — usado para el selector de "Jurídico asignado" en un contrato
++// (ver DetalleContrato.jsx). Sigue sin exponer el rol de cada quien en la respuesta.
+ router.get(
+     '/directorio',
+     requireAuth,
+     asyncHandler(async (req, res) => {
+-          const { rows } = await query(
+-                  'SELECT id, nombre, email FROM usuarios WHERE activo = true ORDER BY nombre ASC'
+-                );
++          const rolesFiltro = req.query.rol
++            ? String(req.query.rol).split(',').map((r) => r.trim()).filter(Boolean)
++            : null;
++          const { rows } = rolesFiltro && rolesFiltro.length > 0
++            ? await query(
++                'SELECT id, nombre, email FROM usuarios WHERE activo = true AND rol = ANY($1) ORDER BY nombre ASC',
++                [rolesFiltro]
++              )
++            : await query(
++                'SELECT id, nombre, email FROM usuarios WHERE activo = true ORDER BY nombre ASC'
++              );
+           res.json({ usuarios: rows });
+     })
+   );
+@@ -50,7 +62,7 @@ router.get(
+ router.patch(
+   '/:id',
+   requireAuth,
+-  requireRole('super_admin', 'admin'),
++  requireRole(...ROLES_NIVEL_ADMIN),
+   asyncHandler(async (req, res) => {
+     const { id } = req.params;
+     const { rol, activo, nombre, area, jefeDirectoId, email } = req.body || {};
+diff --git a/backend/src/utils/roles.js b/backend/src/utils/roles.js
+new file mode 100644
+index 0000000..9339a71
+--- /dev/null
++++ b/backend/src/utils/roles.js
+@@ -0,0 +1,16 @@
++// Roles con el mismo nivel de acceso administrativo que "Administrador": entran a Usuarios,
++// Flujos de autorización y Tipos de contrato, y pueden editar/ver cualquier contrato sin
++// restricción de dueño/estatus (ver esRolPrivilegiado en routes/contratos.js). CEO, CFO y Cabeza
++// de Jurídico son, sobre todo, un "puesto" — el flujo de autorización ya identifica a estas
++// personas por id fijo (aprobadorId en flujo_pasos), no por rol — pero se les dio el mismo nivel
++// de acceso administrativo que admin.
++const ROLES_NIVEL_ADMIN = ['super_admin', 'admin', 'ceo', 'cfo', 'cabeza_juridico'];
++
++// Autoridad exclusiva del lado de Jurídico: cancelar un contrato ya vigente y adjuntar un
++// "Documento firmado manual" (ver routes/contratos.js). Antes era cualquier persona con rol
++// "juridico"; ahora es solo Cabeza de Jurídico (con super_admin como respaldo de sistema) — el
++// rol "juridico" normal pasa a solo poder ver esos contratos y comentar mientras están en
++// solicitud (ver ESTATUS_SOLICITUD).
++const ROLES_AUTORIDAD_JURIDICA = ['super_admin', 'cabeza_juridico'];
++
++module.exports = { ROLES_NIVEL_ADMIN, ROLES_AUTORIDAD_JURIDICA };
+diff --git a/frontend/src/App.jsx b/frontend/src/App.jsx
+index a698937..5896b59 100644
+--- a/frontend/src/App.jsx
++++ b/frontend/src/App.jsx
+@@ -16,9 +16,9 @@ import NuevaSolicitudFranquicia from './pages/franquicias/NuevaSolicitudFranquic
+ import Clubes from './pages/franquicias/Clubes.jsx';
+ import CambiarPassword from './pages/CambiarPassword.jsx';
+ 
+-// El módulo de Franquicias es exclusivo de super_admin/admin/juridico (separado del resto
+-// de Contratos/Dashboard, que sí ven otros roles).
+-const ROLES_FRANQUICIAS = ['super_admin', 'admin', 'juridico'];
++// El módulo de Franquicias es exclusivo de super_admin/admin/ceo/cfo/cabeza_juridico/juridico
++// (separado del resto de Contratos/Dashboard, que sí ven otros roles).
++const ROLES_FRANQUICIAS = ['super_admin', 'admin', 'ceo', 'cfo', 'cabeza_juridico', 'juridico'];
+ 
+ export default function App() {
+   return (
+diff --git a/frontend/src/auth/AuthContext.jsx b/frontend/src/auth/AuthContext.jsx
+index 0f529e6..936e476 100644
+--- a/frontend/src/auth/AuthContext.jsx
++++ b/frontend/src/auth/AuthContext.jsx
+@@ -56,9 +56,12 @@ export function AuthProvider({ children }) {
+     setUsuarioState(usuarioActualizado);
+   }, []);
+ 
+-  const esAdmin = usuario && ['admin', 'super_admin'].includes(usuario.rol);
++  // CEO/CFO/Cabeza de Jurídico tienen el mismo acceso administrativo que "Administrador" (son,
++  // sobre todo, un puesto — el flujo de autorización ya los identifica por persona fija, no por
++  // rol).
++  const esAdmin = usuario && ['admin', 'super_admin', 'ceo', 'cfo', 'cabeza_juridico'].includes(usuario.rol);
+   // Quién puede entrar al módulo de Franquicias (dashboard, nueva solicitud, clubes).
+-  const puedeFranquicias = usuario && ['super_admin', 'admin', 'juridico'].includes(usuario.rol);
++  const puedeFranquicias = usuario && ['super_admin', 'admin', 'ceo', 'cfo', 'cabeza_juridico', 'juridico'].includes(usuario.rol);
+ 
+   const value = useMemo(
+     () => ({ usuario, cargando, login, logout, esAdmin, puedeFranquicias, actualizarUsuario }),
+diff --git a/frontend/src/components/DocumentosContrato.jsx b/frontend/src/components/DocumentosContrato.jsx
+index 2abc09d..c21b897 100644
+--- a/frontend/src/components/DocumentosContrato.jsx
++++ b/frontend/src/components/DocumentosContrato.jsx
+@@ -10,8 +10,8 @@ const CATEGORIAS = [
+   { value: 'anexo', label: 'Anexo' },
+   { value: 'evidencia', label: 'Evidencia' },
+   { value: 'otro', label: 'Otro' },
+-  // Solo la ve/puede elegirla jurídico (ver filtro más abajo y el checkeo en el backend,
+-  // POST /:id/documentos): contratos con firma física, no vía Documenso.
++  // Solo la ve/puede elegirla Cabeza de Jurídico (ver filtro más abajo y el checkeo en el
++  // backend, POST /:id/documentos): contratos con firma física, no vía Documenso.
+   { value: 'firmado_manual', label: 'Documento firmado manual' },
+ ];
+ 
+@@ -80,8 +80,11 @@ export default function DocumentosContrato({
+     contraparteEmail,
+ }) {
+   const { usuario } = useAuth();
+-  const esJuridico = usuario?.rol === 'juridico';
+-  const categoriasDisponibles = CATEGORIAS.filter((c) => c.value !== 'firmado_manual' || esJuridico);
++  // Antes era cualquier persona con rol "juridico"; ahora "Documento firmado manual" es
++  // autoridad exclusiva de Cabeza de Jurídico (con super_admin de respaldo) — ver
++  // ROLES_AUTORIDAD_JURIDICA en el backend (routes/contratos.js).
++  const puedeFirmadoManual = usuario && ['super_admin', 'cabeza_juridico'].includes(usuario.rol);
++  const categoriasDisponibles = CATEGORIAS.filter((c) => c.value !== 'firmado_manual' || puedeFirmadoManual);
+ 
+   const [archivo, setArchivo] = useState(null);
+   const [categoria, setCategoria] = useState(CATEGORIAS[0].value);
+diff --git a/frontend/src/components/Layout.jsx b/frontend/src/components/Layout.jsx
+index 5799954..af37d47 100644
+--- a/frontend/src/components/Layout.jsx
++++ b/frontend/src/components/Layout.jsx
+@@ -8,6 +8,7 @@ const ROL_LABELS = {
+   admin: 'Administrador',
+   ceo: 'CEO',
+   cfo: 'CFO',
++  cabeza_juridico: 'Cabeza de Jurídico',
+   juridico: 'Jurídico',
+   aprobador: 'Aprobador',
+   solicitante: 'Solicitante',
+diff --git a/frontend/src/pages/admin/Usuarios.jsx b/frontend/src/pages/admin/Usuarios.jsx
+index 3c755d8..88c6c70 100644
+--- a/frontend/src/pages/admin/Usuarios.jsx
++++ b/frontend/src/pages/admin/Usuarios.jsx
+@@ -8,15 +8,17 @@ const ROLES = [
+   { value: 'admin', label: 'Administrador' },
+   { value: 'ceo', label: 'CEO' },
+   { value: 'cfo', label: 'CFO' },
++  { value: 'cabeza_juridico', label: 'Cabeza de Jurídico' },
+   { value: 'juridico', label: 'Jurídico' },
+   { value: 'aprobador', label: 'Aprobador' },
+   { value: 'solicitante', label: 'Solicitante' },
+   { value: 'lectura', label: 'Lectura' },
+ ];
+ 
+-// Igual que en el backend: solo un super_admin puede asignar estos roles (CEO/CFO son, sobre
+-// todo, un "puesto" — los pasos de flujo ya identifican a la persona fija por id, no por rol).
+-const ROLES_RESTRINGIDOS = ['super_admin', 'ceo', 'cfo'];
++// Igual que en el backend: solo un super_admin puede asignar estos roles (CEO/CFO/Cabeza de
++// Jurídico son, sobre todo, un "puesto" — los pasos de flujo ya identifican a la persona fija
++// por id, no por rol).
++const ROLES_RESTRINGIDOS = ['super_admin', 'ceo', 'cfo', 'cabeza_juridico'];
+ 
+ // Sentinel del <select> de jefe directo para "esta persona no tiene" (dirección general) — se
+ // manda como jefeDirectoId: null, distinto de dejarlo sin tocar (por eso no puede ser '').
+diff --git a/frontend/src/pages/contratos/DetalleContrato.jsx b/frontend/src/pages/contratos/DetalleContrato.jsx
+index 39723c3..8d29348 100644
+--- a/frontend/src/pages/contratos/DetalleContrato.jsx
++++ b/frontend/src/pages/contratos/DetalleContrato.jsx
+@@ -101,6 +101,19 @@ export default function DetalleContrato() {
+   const [motivoCancelacion, setMotivoCancelacion] = useState('');
+   const [cancelandoContrato, setCancelandoContrato] = useState(false);
+ 
++  // Jurídico asignado a este contrato (dropdown editable solo por Cabeza de Jurídico/super_admin).
++  const [juridicoOpciones, setJuridicoOpciones] = useState([]);
++  const [guardandoAsignado, setGuardandoAsignado] = useState(false);
++  const [errorAsignado, setErrorAsignado] = useState('');
++
++  // Hilo de comentarios internos (distinto del comentario de decisión de arriba, que ya usa el
++  // estado "comentarios").
++  const [comentariosLista, setComentariosLista] = useState([]);
++  const [cargandoComentarios, setCargandoComentarios] = useState(false);
++  const [nuevoComentario, setNuevoComentario] = useState('');
++  const [enviandoComentario, setEnviandoComentario] = useState(false);
++  const [errorComentario, setErrorComentario] = useState('');
++
+   const cargar = useCallback(async () => {
+     setCargando(true);
+     setError('');
+@@ -158,9 +171,74 @@ export default function DetalleContrato() {
+   const puedeEnviar = puedeEditarEstatus && (esSolicitante || esAdmin);
+   const puedeEditar = puedeEditarEstatus && (esSolicitante || esAdmin);
+   const puedeCancelarSolicitud = ESTATUS_SOLICITUD.includes(contrato?.estatus) && (esSolicitante || esAdmin);
+-  const puedeCancelarContrato = ESTATUS_VIGENTE.includes(contrato?.estatus) && usuario?.rol === 'juridico';
++  // Antes era cualquier persona con rol "juridico"; ahora es autoridad exclusiva de Cabeza de
++  // Jurídico (con super_admin de respaldo) — ver ROLES_AUTORIDAD_JURIDICA en el backend.
++  const puedeCancelarContrato = ESTATUS_VIGENTE.includes(contrato?.estatus)
++    && usuario && ['super_admin', 'cabeza_juridico'].includes(usuario.rol);
+   const esVigente = ESTATUS_VIGENTE.includes(contrato?.estatus);
+ 
++  // Solo Cabeza de Jurídico (o super_admin) puede llenar el dropdown de "Jurídico asignado";
++  // jurídico normal (y el resto) solo ve el nombre ya asignado.
++  const puedeAsignarJuridico = usuario && ['super_admin', 'cabeza_juridico'].includes(usuario.rol);
++  // Los roles de nivel admin (esAdmin, incluye Cabeza de Jurídico) pueden comentar siempre;
++  // jurídico normal solo mientras la solicitud sigue en borrador/en_revision/en_autorizacion.
++  const puedeComentar = esAdmin || (usuario?.rol === 'juridico' && ESTATUS_SOLICITUD.includes(contrato?.estatus));
++
++  // Directorio de personas con rol "juridico" (y cabeza_juridico) para llenar el dropdown de
++  // asignación — solo se necesita si este usuario puede editarlo.
++  useEffect(() => {
++    if (!puedeAsignarJuridico) return;
++    api.get('/usuarios/directorio', { rol: 'juridico,cabeza_juridico' })
++      .then((data) => setJuridicoOpciones(unwrap(data, 'usuarios') || []))
++      .catch(() => {});
++  }, [puedeAsignarJuridico]);
++
++  // Hilo de comentarios internos del contrato (distinto del comentario de decisión de arriba).
++  const cargarComentarios = useCallback(async () => {
++    if (!contrato?.id) return;
++    setCargandoComentarios(true);
++    try {
++      const data = await api.get(`/contratos/${contrato.id}/comentarios`);
++      setComentariosLista(unwrap(data, 'comentarios') || []);
++    } catch {
++      // No es crítico si no cargan; se deja la lista vacía.
++    } finally {
++      setCargandoComentarios(false);
++    }
++  }, [contrato?.id]);
++
++  useEffect(() => { cargarComentarios(); }, [cargarComentarios]);
++
++  async function handleCambiarJuridicoAsignado(e) {
++    const nuevoId = e.target.value || null;
++    setErrorAsignado('');
++    setGuardandoAsignado(true);
++    try {
++      await api.patch(`/contratos/${id}/juridico-asignado`, { juridicoAsignadoId: nuevoId });
++      await cargar();
++    } catch (err) {
++      setErrorAsignado(err.message || 'No se pudo actualizar el jurídico asignado.');
++    } finally {
++      setGuardandoAsignado(false);
++    }
++  }
++
++  async function handleAgregarComentario(e) {
++    e.preventDefault();
++    if (!nuevoComentario.trim()) return;
++    setErrorComentario('');
++    setEnviandoComentario(true);
++    try {
++      await api.post(`/contratos/${id}/comentarios`, { comentario: nuevoComentario.trim() });
++      setNuevoComentario('');
++      await cargarComentarios();
++    } catch (err) {
++      setErrorComentario(err.message || 'No se pudo agregar el comentario.');
++    } finally {
++      setEnviandoComentario(false);
++    }
++  }
++
+   const pasoActual = useMemo(() => {
+     const ordenadas = [...aprobaciones].sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
+     return ordenadas.find((a) => normalizarDecision(a) === 'pendiente') || null;
+@@ -353,8 +431,8 @@ export default function DetalleContrato() {
+         <div className="card" style={{ borderColor: 'var(--color-danger, #c0392b)' }}>
+           <div className="card-title">Cancelar este contrato vigente</div>
+           <p className="muted" style={{ fontSize: 13, marginTop: -8 }}>
+-            Esta acción es solo para jurídico y no se puede deshacer. El motivo queda guardado en el
+-            expediente del contrato.
++            Esta acción es solo para Cabeza de Jurídico y no se puede deshacer. El motivo queda
++            guardado en el expediente del contrato.
+           </p>
+           <form onSubmit={handleCancelarContrato}>
+             <div className="field">
+@@ -568,6 +646,33 @@ export default function DetalleContrato() {
+         </div>
+ 
+         <div>
++          <div className="card">
++            <div className="card-title">Jurídico asignado</div>
++            {errorAsignado && <div className="alert alert-error">{errorAsignado}</div>}
++            {puedeAsignarJuridico ? (
++              <div className="field">
++                <label htmlFor="juridico-asignado">
++                  Persona de jurídico dando seguimiento a este contrato
++                </label>
++                <select
++                  id="juridico-asignado"
++                  value={contrato.juridicoAsignado?.id || ''}
++                  onChange={handleCambiarJuridicoAsignado}
++                  disabled={guardandoAsignado}
++                >
++                  <option value="">Sin asignar</option>
++                  {juridicoOpciones.map((op) => (
++                    <option key={op.id} value={op.id}>{op.nombre}</option>
++                  ))}
++                </select>
++              </div>
++            ) : (
++              <p className="muted" style={{ margin: 0 }}>
++                {contrato.juridicoAsignado?.nombre || 'Sin asignar todavía.'}
++              </p>
++            )}
++          </div>
++
+           <div className="card">
+             <div className="card-title">Flujo de autorización</div>
+             <AutorizacionTimeline aprobaciones={aprobaciones} enviado={fueEnviado} />
+@@ -608,6 +713,46 @@ export default function DetalleContrato() {
+               </>
+             )}
+           </div>
++
++          <div className="card">
++            <div className="card-title">Comentarios internos</div>
++            {cargandoComentarios ? (
++              <Spinner label="Cargando comentarios…" />
++            ) : comentariosLista.length === 0 ? (
++              <p className="muted" style={{ margin: 0 }}>Aún no hay comentarios.</p>
++            ) : (
++              <ul className="comment-list" style={{ listStyle: 'none', padding: 0, margin: '0 0 16px' }}>
++                {comentariosLista.map((c) => (
++                  <li key={c.id} style={{ marginBottom: 12 }}>
++                    <div style={{ fontSize: 13 }}>
++                      <strong>{c.usuarioNombre}</strong>{' '}
++                      <span className="muted">· {formatFechaHora(c.createdAt)}</span>
++                    </div>
++                    <div>{c.comentario}</div>
++                  </li>
++                ))}
++              </ul>
++            )}
++            {errorComentario && <div className="alert alert-error">{errorComentario}</div>}
++            {puedeComentar && (
++              <form onSubmit={handleAgregarComentario}>
++                <div className="field">
++                  <label htmlFor="nuevo-comentario">Agregar comentario</label>
++                  <textarea
++                    id="nuevo-comentario"
++                    value={nuevoComentario}
++                    onChange={(e) => setNuevoComentario(e.target.value)}
++                    placeholder="Escribe un comentario para este contrato…"
++                  />
++                </div>
++                <div className="form-actions">
++                  <button type="submit" className="btn btn-secondary" disabled={enviandoComentario || !nuevoComentario.trim()}>
++                    {enviandoComentario ? 'Enviando…' : 'Comentar'}
++                  </button>
++                </div>
++              </form>
++            )}
++          </div>
+         </div>
+       </div>
+     </div>
+diff --git a/frontend/src/pages/contratos/ListaContratos.jsx b/frontend/src/pages/contratos/ListaContratos.jsx
+index 3512b51..a8dbbe4 100644
+--- a/frontend/src/pages/contratos/ListaContratos.jsx
++++ b/frontend/src/pages/contratos/ListaContratos.jsx
+@@ -161,13 +161,14 @@ export default function ListaContratos({ vista = 'solicitudes' }) {
+                 <th>Monto</th>
+                 <th>Vencimiento</th>
+                 <th>Estatus</th>
++                <th>Jurídico asignado</th>
+                 {vista === 'vigentes' && <th>Firma</th>}
+               </tr>
+             </thead>
+             <tbody>
+               {contratos.length === 0 ? (
+                 <tr>
+-                  <td colSpan={vista === 'vigentes' ? 9 : 8} className="table-empty">{config.vacioTexto}</td>
++                  <td colSpan={vista === 'vigentes' ? 10 : 9} className="table-empty">{config.vacioTexto}</td>
+                 </tr>
+               ) : (
+                 contratos.map((c) => (
+@@ -180,6 +181,7 @@ export default function ListaContratos({ vista = 'solicitudes' }) {
+                     <td>{formatMonto(c.monto, c.moneda)}</td>
+                     <td>{formatFecha(c.fechaFin)}</td>
+                     <td><EstatusBadge estatus={c.estatus} /></td>
++                    <td>{c.juridicoAsignadoNombre || '—'}</td>
+                     {vista === 'vigentes' && <td><FirmaContratoBadge firmado={c.firmado} /></td>}
+                   </tr>
+                 ))
+-- 
+2.43.0
+

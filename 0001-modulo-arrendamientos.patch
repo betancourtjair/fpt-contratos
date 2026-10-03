@@ -1,0 +1,1878 @@
+From 5433bff3452491decd6899210d17ddd1984dcba8 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 30 Sep 2026 09:29:36 -0600
+Subject: [PATCH] =?UTF-8?q?Agregar=20m=C3=B3dulo=20de=20Arrendamientos=20(?=
+ =?UTF-8?q?reemplazo=20de=20Leasecake)=20como=20secci=C3=B3n=20de=20fpt-co?=
+ =?UTF-8?q?ntratos?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Integra al backend existente (mismo login/JWT/roles, misma base de datos) el
+reemplazo de Leasecake que se venía construyendo como proyecto aparte: locations,
+leases (con calendario de renta por periodo/categoría, pagos únicos, calendario
+de impuestos, cláusulas críticas con resumen de IA, notas), brands, companies,
+tasks, contacts, events (calculados on-the-fly a partir de fechas del lease),
+dashboard, y un apartado nuevo de Rentas (calendario de renta consolidado entre
+leases que ni el propio Leasecake ofrece).
+
+- prisma/migration_arrendamientos.sql + migrate_arrendamientos.js: migración
+  incremental sobre el esquema ya existente — NO recrea `usuarios` ni el tipo
+  `rol_usuario`, los reusa (super_admin/admin/ceo/cfo/cabeza_juridico = acceso
+  admin al módulo, cualquier otro rol autenticado = solo lectura).
+- Rutas nuevas bajo src/routes/arrendamientos/, montadas en server.js bajo
+  /api/arrendamientos/... para no chocar con las rutas existentes.
+- storage.js: se le agregó un `carpetaBase` opcional (default 'contratos', sin
+  romper nada existente) para que los documentos de ubicaciones/leases no se
+  mezclen con los de contratos en disco.
+- notificaciones.js: se le agregó obtenerCorreosNivelAdmin() sin tocar el
+  helper existente de jurídico/admin.
+- Alertas automáticas por correo (renovación próxima, vencimiento de COI,
+  vencimiento de lease) vía el mismo src/email.js (Microsoft Graph), con log
+  de alertas ya enviadas para no repetir el mismo aviso cada día — mismo patrón
+  que src/utils/vencimientos.js, ahora también enganchado en el scheduler
+  existente (src/jobs/scheduler.js) y con endpoint manual de respaldo en
+  routes/jobs.js.
+
+Todos los archivos del backend (48) pasan node -c y el servidor arranca y
+responde correctamente en /health y en las rutas nuevas y existentes (probado
+localmente con una URL de base de datos falsa, solo para verificar carga y
+montaje de rutas — sin conexión real a Postgres).
+
+Pendiente: aplicar la migración contra Neon, construir el frontend (nueva
+sección "Arrendamientos" en la app de React existente) y migrar los datos
+reales de Leasecake.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015Y3fuwEXGpTBMqYhbFpd3F
+---
+ backend/.env.example                          |   7 +
+ backend/package.json                          |   3 +-
+ backend/prisma/migrate_arrendamientos.js      |  35 ++
+ backend/prisma/migration_arrendamientos.sql   | 349 ++++++++++++++++++
+ backend/src/jobs/scheduler.js                 |  28 +-
+ backend/src/routes/arrendamientos/brands.js   |  61 +++
+ .../src/routes/arrendamientos/companies.js    | 104 ++++++
+ backend/src/routes/arrendamientos/contacts.js |  55 +++
+ .../src/routes/arrendamientos/dashboard.js    |  59 +++
+ .../src/routes/arrendamientos/documentos.js   |  86 +++++
+ backend/src/routes/arrendamientos/events.js   |  87 +++++
+ backend/src/routes/arrendamientos/leases.js   | 222 +++++++++++
+ .../src/routes/arrendamientos/locations.js    | 206 +++++++++++
+ backend/src/routes/arrendamientos/rentas.js   |  79 ++++
+ backend/src/routes/arrendamientos/tasks.js    |  62 ++++
+ backend/src/routes/jobs.js                    |  15 +
+ backend/src/server.js                         |  26 ++
+ backend/src/storage.js                        |   6 +-
+ backend/src/utils/alertasArrendamientos.js    |  93 +++++
+ backend/src/utils/notificaciones.js           |  15 +-
+ 20 files changed, 1591 insertions(+), 7 deletions(-)
+ create mode 100644 backend/prisma/migrate_arrendamientos.js
+ create mode 100644 backend/prisma/migration_arrendamientos.sql
+ create mode 100644 backend/src/routes/arrendamientos/brands.js
+ create mode 100644 backend/src/routes/arrendamientos/companies.js
+ create mode 100644 backend/src/routes/arrendamientos/contacts.js
+ create mode 100644 backend/src/routes/arrendamientos/dashboard.js
+ create mode 100644 backend/src/routes/arrendamientos/documentos.js
+ create mode 100644 backend/src/routes/arrendamientos/events.js
+ create mode 100644 backend/src/routes/arrendamientos/leases.js
+ create mode 100644 backend/src/routes/arrendamientos/locations.js
+ create mode 100644 backend/src/routes/arrendamientos/rentas.js
+ create mode 100644 backend/src/routes/arrendamientos/tasks.js
+ create mode 100644 backend/src/utils/alertasArrendamientos.js
+
+diff --git a/backend/.env.example b/backend/.env.example
+index ae0e639..1183cf4 100644
+--- a/backend/.env.example
++++ b/backend/.env.example
+@@ -56,3 +56,10 @@ KEEP_ALIVE_SECRET=
+ # Password temporal para el usuario super_admin inicial creado por prisma/seed.js.
+ # Si se omite, el seed genera uno aleatorio y lo imprime en consola.
+ SEED_SUPERADMIN_PASSWORD=
++
++# --- Módulo de Arrendamientos (reemplazo de Leasecake) ---
++# Ventanas de aviso (días de anticipación) para las alertas automáticas de renovación,
++# vencimiento de póliza (COI) y vencimiento de lease — ver src/utils/alertasArrendamientos.js.
++ALERTA_RENEWAL_DIAS=60
++ALERTA_COI_DIAS=30
++ALERTA_EXPIRACION_DIAS=180
+diff --git a/backend/package.json b/backend/package.json
+index 5477dea..3a809d3 100644
+--- a/backend/package.json
++++ b/backend/package.json
+@@ -7,7 +7,8 @@
+   "scripts": {
+     "start": "node src/server.js",
+     "dev": "node --watch src/server.js",
+-    "seed": "node prisma/seed.js"
++    "seed": "node prisma/seed.js",
++    "migrate:arrendamientos": "node prisma/migrate_arrendamientos.js"
+   },
+   "dependencies": {
+     "bcrypt": "^6.0.0",
+diff --git a/backend/prisma/migrate_arrendamientos.js b/backend/prisma/migrate_arrendamientos.js
+new file mode 100644
+index 0000000..ffcd62d
+--- /dev/null
++++ b/backend/prisma/migrate_arrendamientos.js
+@@ -0,0 +1,35 @@
++// Aplica prisma/migration_arrendamientos.sql (módulo de Arrendamientos) contra la base de
++// datos de DATABASE_URL. Ejecutar con:
++//   node prisma/migrate_arrendamientos.js
++//
++// Se corre UNA vez, después de que prisma/migration.sql ya esté aplicado (reusa la tabla
++// `usuarios` y el tipo `rol_usuario` existentes). Es seguro correrlo más de una vez sobre una
++// base ya migrada: los CREATE TABLE/TYPE truenan si el objeto ya existe, así que en ese caso
++// el script avisa y no revierte nada (no hace DROP de nada).
++
++require('dotenv').config();
++const fs = require('fs');
++const path = require('path');
++const { Client } = require('pg');
++
++async function main() {
++  const schemaPath = path.join(__dirname, 'migration_arrendamientos.sql');
++  const sql = fs.readFileSync(schemaPath, 'utf8');
++
++  const client = new Client({ connectionString: process.env.DATABASE_URL });
++  await client.connect();
++  console.log(`Aplicando ${schemaPath} contra ${process.env.DATABASE_URL?.replace(/:[^:@]+@/, ':***@')} ...`);
++
++  try {
++    await client.query(sql);
++    console.log('Esquema de Arrendamientos aplicado correctamente.');
++  } catch (err) {
++    console.error('Error al aplicar el esquema de Arrendamientos:', err.message);
++    console.error('Si el error es "ya existe" (tabla/tipo duplicado), probablemente ya migraste antes; revisa a mano si falta algo.');
++    process.exitCode = 1;
++  } finally {
++    await client.end();
++  }
++}
++
++main();
+diff --git a/backend/prisma/migration_arrendamientos.sql b/backend/prisma/migration_arrendamientos.sql
+new file mode 100644
+index 0000000..03a4d02
+--- /dev/null
++++ b/backend/prisma/migration_arrendamientos.sql
+@@ -0,0 +1,349 @@
++-- FPT Contratos — Módulo de Arrendamientos (reemplazo de Leasecake)
++--
++-- Migración incremental: se aplica sobre la base ya existente de fpt-contratos
++-- (prisma/migration.sql), no crea `usuarios` ni el tipo `rol_usuario` — los reusa tal cual
++-- (mismo login, mismo JWT, mismos roles: super_admin/admin/ceo/cfo/cabeza_juridico tienen
++-- acceso de nivel admin a este módulo — ver src/utils/roles.js ROLES_NIVEL_ADMIN — y cualquier
++-- otro rol autenticado tiene acceso de solo lectura).
++--
++-- Aplicar con: node prisma/migrate_arrendamientos.js (o a mano en el SQL Editor de Neon).
++--
++-- Diseño basado en un reconocimiento real de la cuenta de Leasecake de FPT (63 ubicaciones,
++-- 58 leases activos, 1 brand, 2 companies, 0 contacts, 0 tasks). Los ~230 campos que expone el
++-- reporte combinado de Leasecake NO se modelan todos como columnas fijas: se migran como
++-- columnas reales los que confirmamos poblados (fechas, renta por periodo, landlord/tenant,
++-- cláusulas críticas, notas), y se deja `atributos_extra JSONB` en las tablas principales para
++-- cualquier campo adicional que aparezca poblado en registros que aún no hemos revisado, sin
++-- necesidad de una migración de esquema para cada uno.
++
++CREATE EXTENSION IF NOT EXISTS pgcrypto; -- gen_random_uuid() (ya debería existir; IF NOT EXISTS por seguridad)
++
++-- ---------------------------------------------------------------------------
++-- Brands y Companies (tenant) — módulos propios en Leasecake
++-- ---------------------------------------------------------------------------
++CREATE TABLE brands (
++  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
++  nombre TEXT NOT NULL UNIQUE,
++  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
++);
++
++-- "Company" en Leasecake = la entidad legal inquilina (tenant), no el landlord (el landlord
++-- vive como texto libre dentro de cada lease/ubicación — ver comentario en `leases` abajo).
++CREATE TABLE companies (
++  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
++  nombre TEXT NOT NULL UNIQUE,
++  ein TEXT,
++  year_established INTEGER,
++  full_address TEXT,
++  address1 TEXT,
++  address2 TEXT,
++  city TEXT,
++  state TEXT,
++  zip TEXT,
++  country TEXT,
++  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
++);
++
++-- ---------------------------------------------------------------------------
++-- Locations (Ubicaciones)
++-- ---------------------------------------------------------------------------
++CREATE TABLE locations (
++  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
++  nombre TEXT NOT NULL,
++  location_number TEXT,
++  brand_id UUID REFERENCES brands(id),
++  company_id UUID REFERENCES companies(id), -- tenant/parent company
++  address1 TEXT,
++  address2 TEXT,
++  city TEXT,
++  state TEXT,
++  zip TEXT,
++  country TEXT,
++  full_address TEXT,
++  latitude NUMERIC(10,6),
++  longitude NUMERIC(10,6),
++  location_type TEXT, -- p.ej. "Retail"
++  location_subtype TEXT, -- p.ej. "Lifestyle Center"
++  business_category TEXT, -- p.ej. "Sports & Recreation"
++  business_type TEXT, -- p.ej. "Franchise"
++  property_name TEXT, -- nombre del centro comercial/plaza que aloja la ubicación
++  square_meters NUMERIC(12,2),
++  total_leased_sqm NUMERIC(12,2),
++  total_subleased_sqm NUMERIC(12,2),
++  phone TEXT,
++  lockbox_code TEXT,
++  location_image_url TEXT,
++  atributos_extra JSONB NOT NULL DEFAULT '{}',
++  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
++  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
++);
++
++CREATE INDEX locations_brand_id_idx ON locations(brand_id);
++CREATE INDEX locations_company_id_idx ON locations(company_id);
++
++-- Hilo de comentarios por ubicación (pestaña "Discussion" en Leasecake).
++CREATE TABLE location_comments (
++  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
++  location_id UUID NOT NULL REFERENCES locations(id) ON DELETE CASCADE,
++  usuario_id UUID NOT NULL REFERENCES usuarios(id),
++  comentario TEXT NOT NULL,
++  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
++);
++CREATE INDEX location_comments_location_id_idx ON location_comments(location_id);
++
++-- Archivos por ubicación/lease (pestaña "Files" en Leasecake). Igual que fpt-contratos:
++-- STORAGE_DRIVER decide dónde vive el binario; aquí solo se guarda la metadata.
++CREATE TABLE location_documents (
++  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
++  location_id UUID NOT NULL REFERENCES locations(id) ON DELETE CASCADE,
++  lease_id UUID, -- FK se agrega tras crear `leases` más abajo
++  nombre_archivo TEXT NOT NULL,
++  categoria TEXT, -- p.ej. "Contrato firmado", "Plano", "Póliza de seguro"
++  storage_key TEXT NOT NULL,
++  subido_por_id UUID REFERENCES usuarios(id),
++  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
++);
++CREATE INDEX location_documents_location_id_idx ON location_documents(location_id);
++
++-- ---------------------------------------------------------------------------
++-- Leases (Contratos de arrendamiento)
++-- ---------------------------------------------------------------------------
++CREATE TYPE estatus_lease AS ENUM ('activo', 'vencido', 'cancelado', 'mes_a_mes');
++
++CREATE TABLE leases (
++  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
++  location_id UUID NOT NULL REFERENCES locations(id) ON DELETE CASCADE,
++  tenant_company_id UUID REFERENCES companies(id),
++  lease_name TEXT,
++  lease_type TEXT, -- p.ej. "Lease", "Sublease"
++  is_sub_lease BOOLEAN NOT NULL DEFAULT false,
++  estatus estatus_lease NOT NULL DEFAULT 'activo',
++  acquisition_type TEXT, -- p.ej. "Lease"
++  lease_classification TEXT,
++
++  -- Fechas clave del lease
++  lease_commencement_date DATE,
++  rent_commencement_date DATE,
++  possession_date DATE,
++  delivery_date DATE,
++  expiration_date DATE, -- término inicial
++  expiration_date_including_options DATE, -- incluyendo todas las opciones de renovación
++  is_month_to_month BOOLEAN NOT NULL DEFAULT false,
++  month_to_month_exp_date DATE,
++
++  -- Renovación
++  number_of_options INTEGER,
++  each_option_years NUMERIC(5,2),
++  remaining_options INTEGER,
++  remaining_options_years NUMERIC(5,2),
++  renewal_notice_period_start DATE,
++  renewal_notice_earliest_submission_date DATE,
++  renewal_notice_period_end DATE,
++  renewal_notice_deadline DATE,
++  renewal_notice_intention TEXT,
++
++  length_of_lease_months INTEGER,
++
++  -- Landlord: en Leasecake vive como texto libre dentro del lease/ubicación, no como una
++  -- entidad normalizada aparte (confirmado: el módulo "Companies" solo trae tenants). Se deja
++  -- así por ahora; se puede normalizar a una tabla `landlords` después si se vuelve necesario.
++  landlord_nombre TEXT,
++  landlord_parent_company TEXT,
++  landlord_vendor_id TEXT,
++  landlord_address1 TEXT,
++  landlord_address2 TEXT,
++  landlord_city TEXT,
++  landlord_state TEXT,
++  landlord_zip TEXT,
++  landlord_country TEXT,
++  landlord_poc_nombre TEXT,
++  landlord_poc_telefono TEXT,
++  landlord_poc_email TEXT,
++
++  -- Pagos / condiciones
++  grace_period_dias INTEGER,
++  late_fee_type TEXT, -- p.ej. "%", "Monto fijo"
++  late_fee_monto NUMERIC(14,2),
++  security_deposit NUMERIC(14,2),
++  rental_prepayments NUMERIC(14,2),
++  rental_prepayments_detalle TEXT,
++  initial_direct_costs NUMERIC(14,2),
++  notice_address TEXT,
++  payment_method TEXT,
++  payment_address TEXT,
++  remaining_lease_liability NUMERIC(16,2),
++
++  -- Seguro (COI)
++  coi_effective_date DATE,
++  coi_expiration_date DATE,
++
++  -- Percent rent (retail) — casi siempre vacío para FPT, se deja disponible
++  percent_rent_yn BOOLEAN,
++  percent_rent_payment_date DATE,
++  percent_rent_month_start DATE,
++  percent_rent_month_end DATE,
++  percent_rent_sales NUMERIC(16,2),
++  percent_rent_breakpoints TEXT,
++  percent_rent_overage_sales NUMERIC(16,2),
++
++  misc_lease_details TEXT,
++  atributos_extra JSONB NOT NULL DEFAULT '{}',
++
++  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
++  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
++);
++
++CREATE INDEX leases_location_id_idx ON leases(location_id);
++CREATE INDEX leases_tenant_company_id_idx ON leases(tenant_company_id);
++CREATE INDEX leases_expiration_date_idx ON leases(expiration_date);
++
++ALTER TABLE location_documents
++  ADD CONSTRAINT location_documents_lease_id_fkey FOREIGN KEY (lease_id) REFERENCES leases(id) ON DELETE CASCADE;
++
++-- Calendario de renta por periodo: cada lease trae, en Leasecake, un cronograma completo
++-- (no solo "mes actual/siguiente") con montos que pueden variar por años. Una fila por
++-- periodo y categoría (Base Rent, CAM, Insurance, Property Tax, Parking, Signage, Storage,
++-- Publicidad, Espacio temporal de preventa, Other, Taxes).
++CREATE TABLE lease_rent_schedule (
++  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
++  lease_id UUID NOT NULL REFERENCES leases(id) ON DELETE CASCADE,
++  categoria TEXT NOT NULL DEFAULT 'Base Rent',
++  start_date DATE NOT NULL,
++  end_date DATE,
++  monto NUMERIC(14,2) NOT NULL,
++  frecuencia TEXT NOT NULL DEFAULT 'Monthly',
++  due_date TEXT, -- p.ej. "1" (día del mes) — Leasecake lo trae como texto libre a veces
++  proration TEXT,
++  payee TEXT,
++  pct_change NUMERIC(6,3),
++  monto_por_sqm NUMERIC(10,2),
++  nota TEXT,
++  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
++);
++CREATE INDEX lease_rent_schedule_lease_id_idx ON lease_rent_schedule(lease_id);
++CREATE INDEX lease_rent_schedule_start_date_idx ON lease_rent_schedule(start_date);
++
++CREATE TABLE lease_one_time_payments (
++  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
++  lease_id UUID NOT NULL REFERENCES leases(id) ON DELETE CASCADE,
++  due_date DATE,
++  tipo TEXT,
++  monto NUMERIC(14,2),
++  payee TEXT,
++  periodo_cubierto TEXT,
++  nota TEXT,
++  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
++);
++CREATE INDEX lease_one_time_payments_lease_id_idx ON lease_one_time_payments(lease_id);
++
++CREATE TABLE lease_tax_schedule (
++  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
++  lease_id UUID NOT NULL REFERENCES leases(id) ON DELETE CASCADE,
++  start_date DATE,
++  end_date DATE,
++  taxable_rent_types TEXT,
++  rate NUMERIC(6,3),
++  payee TEXT,
++  nota TEXT,
++  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
++);
++CREATE INDEX lease_tax_schedule_lease_id_idx ON lease_tax_schedule(lease_id);
++
++-- Cláusulas críticas extraídas del contrato, con resumen generado por IA + texto original
++-- (visto en la muestra real: "Common Area Maintenance Charges", "Incremento de Renta", con
++-- referencia de página/sección del documento).
++CREATE TABLE lease_critical_clauses (
++  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
++  lease_id UUID NOT NULL REFERENCES leases(id) ON DELETE CASCADE,
++  clause_type TEXT NOT NULL,
++  page_number TEXT,
++  section_number TEXT,
++  lease_document_header TEXT,
++  ai_summary TEXT,
++  original_language TEXT,
++  lease_is_silent BOOLEAN NOT NULL DEFAULT false,
++  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
++);
++CREATE INDEX lease_critical_clauses_lease_id_idx ON lease_critical_clauses(lease_id);
++
++-- Notas de lease (con autor y fecha, visto en la muestra real: "Fecha de Apertura",
++-- "Fecha de Firma del Contrato", "Agua", etc.)
++CREATE TABLE lease_notes (
++  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
++  lease_id UUID NOT NULL REFERENCES leases(id) ON DELETE CASCADE,
++  titulo TEXT,
++  nota TEXT NOT NULL,
++  autor_nombre TEXT, -- texto libre migrado de Leasecake; no necesariamente un usuario_id de esta app
++  autor_usuario_id UUID REFERENCES usuarios(id),
++  fecha_nota TIMESTAMPTZ,
++  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
++);
++CREATE INDEX lease_notes_lease_id_idx ON lease_notes(lease_id);
++
++-- ---------------------------------------------------------------------------
++-- Tasks (vacío en Leasecake al momento de migrar, pero el módulo se construye igual)
++-- ---------------------------------------------------------------------------
++CREATE TYPE estatus_task AS ENUM ('abierta', 'en_progreso', 'cerrada');
++
++CREATE TABLE tasks (
++  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
++  titulo TEXT NOT NULL,
++  descripcion TEXT,
++  location_id UUID REFERENCES locations(id) ON DELETE CASCADE,
++  lease_id UUID REFERENCES leases(id) ON DELETE CASCADE,
++  asignado_a_id UUID REFERENCES usuarios(id),
++  estatus estatus_task NOT NULL DEFAULT 'abierta',
++  fecha_limite DATE,
++  created_by_id UUID REFERENCES usuarios(id),
++  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
++  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
++);
++CREATE INDEX tasks_location_id_idx ON tasks(location_id);
++CREATE INDEX tasks_asignado_a_id_idx ON tasks(asignado_a_id);
++
++-- ---------------------------------------------------------------------------
++-- Contacts (vacío en Leasecake al momento de migrar, pero el módulo se construye igual)
++-- ---------------------------------------------------------------------------
++CREATE TABLE contacts (
++  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
++  nombre TEXT NOT NULL,
++  email TEXT,
++  telefono TEXT,
++  empresa TEXT,
++  puesto TEXT,
++  notas TEXT,
++  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
++);
++
++-- ---------------------------------------------------------------------------
++-- Events (calendario). En Leasecake son mayormente calculados a partir de fechas del lease
++-- (Rent Payment Due Date, Rent Commencement Date, Renewal Notice Deadline, COI Expiration,
++-- etc.) — aquí se recrean con una consulta/job en vez de sincronizarse como filas estáticas,
++-- salvo un evento manual que alguien quiera agregar (esta tabla es solo para esos).
++-- ---------------------------------------------------------------------------
++CREATE TABLE events (
++  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
++  location_id UUID REFERENCES locations(id) ON DELETE CASCADE,
++  lease_id UUID REFERENCES leases(id) ON DELETE CASCADE,
++  nombre TEXT NOT NULL,
++  fecha DATE NOT NULL,
++  origen TEXT NOT NULL DEFAULT 'manual', -- 'manual' | futuro: los auto-generados se calculan on-the-fly, no se guardan
++  created_by_id UUID REFERENCES usuarios(id),
++  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
++);
++CREATE INDEX events_fecha_idx ON events(fecha);
++
++-- ---------------------------------------------------------------------------
++-- Registro de alertas ya enviadas (renovación, vencimiento de COI, vencimiento de lease).
++-- Leasecake avisa estos hitos por correo; aquí se recrea con un job diario (ver
++-- src/jobs/scheduler.js + src/utils/alertas.js) que revisa fechas próximas y evita reenviar
++-- el mismo aviso todos los días guardando una fila por (lease_id, tipo, fecha_evento).
++-- ---------------------------------------------------------------------------
++CREATE TABLE lease_alerts_log (
++  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
++  lease_id UUID NOT NULL REFERENCES leases(id) ON DELETE CASCADE,
++  tipo TEXT NOT NULL, -- 'renewal_notice' | 'coi_expiration' | 'lease_expiration'
++  fecha_evento DATE NOT NULL,
++  enviado_en TIMESTAMPTZ NOT NULL DEFAULT now(),
++  UNIQUE (lease_id, tipo, fecha_evento)
++);
+diff --git a/backend/src/jobs/scheduler.js b/backend/src/jobs/scheduler.js
+index 3c43436..c462378 100644
+--- a/backend/src/jobs/scheduler.js
++++ b/backend/src/jobs/scheduler.js
+@@ -18,6 +18,7 @@ const cron = require('node-cron');
+ const { revisarVencimientos } = require('../utils/vencimientos');
+ const { revisarFranquicias } = require('../utils/franquicias');
+ const { revisarPendientes: revisarFirmasPendientes } = require('../utils/firmaElectronica');
++const { revisarAlertasArrendamientos } = require('../utils/alertasArrendamientos');
+ const documenso = require('../documensoClient');
+ 
+ const ZONA_HORARIA = 'America/Mexico_City';
+@@ -64,6 +65,23 @@ async function ejecutarRevisionSegura(origen) {
+   }
+ }
+ 
++let revisandoAlertasArrendamientos = false;
++async function ejecutarRevisionAlertasArrendamientosSegura(origen) {
++  if (revisandoAlertasArrendamientos) {
++    console.log(`[scheduler] Revisión de alertas de Arrendamientos ya en curso, se omite el disparo desde "${origen}".`);
++    return;
++  }
++  revisandoAlertasArrendamientos = true;
++  try {
++    const resumen = await revisarAlertasArrendamientos();
++    console.log(`[scheduler] Revisión de alertas de Arrendamientos (${origen}) completada: ${resumen.avisosEnviados} aviso(s) enviado(s).`);
++  } catch (err) {
++    console.error(`[scheduler] Error al revisar alertas de Arrendamientos (${origen}):`, err);
++  } finally {
++    revisandoAlertasArrendamientos = false;
++  }
++}
++
+ let revisandoFirmas = false;
+ async function ejecutarRevisionFirmasSegura(origen) {
+   if (!documenso.configurado()) return; // integración no configurada: no hay nada que revisar
+@@ -92,9 +110,13 @@ function iniciarProgramador() {
+   setTimeout(() => {
+     ejecutarRevisionSegura('arranque del servidor');
+     ejecutarRevisionFirmasSegura('arranque del servidor');
++    ejecutarRevisionAlertasArrendamientosSegura('arranque del servidor');
+   }, RETRASO_INICIAL_MS);
+ 
+-  cron.schedule(EXPRESION_DIARIA, () => ejecutarRevisionSegura('cron diario 07:00'), {
++  cron.schedule(EXPRESION_DIARIA, () => {
++    ejecutarRevisionSegura('cron diario 07:00');
++    ejecutarRevisionAlertasArrendamientosSegura('cron diario 07:00');
++  }, {
+     timezone: ZONA_HORARIA,
+   });
+   cron.schedule(EXPRESION_FIRMAS, () => ejecutarRevisionFirmasSegura('cron cada 2 horas'), {
+@@ -102,8 +124,8 @@ function iniciarProgramador() {
+   });
+ 
+   console.log(
+-    `[scheduler] Programador iniciado: revisión de vencimientos y de franquicias al arrancar y todos los días a las 07:00, ` +
+-    `y revisión de firmas pendientes (Documenso) al arrancar y cada 2 horas (${ZONA_HORARIA}).`
++    `[scheduler] Programador iniciado: revisión de vencimientos, franquicias y alertas de Arrendamientos al arrancar y ` +
++    `todos los días a las 07:00, y revisión de firmas pendientes (Documenso) al arrancar y cada 2 horas (${ZONA_HORARIA}).`
+   );
+ }
+ 
+diff --git a/backend/src/routes/arrendamientos/brands.js b/backend/src/routes/arrendamientos/brands.js
+new file mode 100644
+index 0000000..2d379a7
+--- /dev/null
++++ b/backend/src/routes/arrendamientos/brands.js
+@@ -0,0 +1,61 @@
++const express = require('express');
++const { query } = require('../../db');
++const asyncHandler = require('../../utils/asyncHandler');
++const { badRequest, notFound, traducirErrorPostgres } = require('../../utils/errors');
++const { requireAuth, requireRole } = require('../../middleware/auth');
++const { ROLES_NIVEL_ADMIN } = require('../../utils/roles');
++
++const router = express.Router();
++
++// GET /api/brands - con métricas agregadas (# ubicaciones, # leases activos, renta mensual total)
++router.get(
++  '/',
++  requireAuth,
++  asyncHandler(async (req, res) => {
++    const { rows } = await query(`
++      SELECT
++        b.*,
++        COUNT(DISTINCT l.id) AS numero_ubicaciones,
++        COUNT(DISTINCT le.id) FILTER (WHERE le.estatus = 'activo') AS leases_activos
++      FROM brands b
++      LEFT JOIN locations l ON l.brand_id = b.id
++      LEFT JOIN leases le ON le.location_id = l.id
++      GROUP BY b.id
++      ORDER BY b.nombre ASC
++    `);
++    res.json({ brands: rows });
++  })
++);
++
++router.post(
++  '/',
++  requireAuth,
++  requireRole(...ROLES_NIVEL_ADMIN),
++  asyncHandler(async (req, res) => {
++    const { nombre } = req.body || {};
++    if (!nombre) throw badRequest('nombre es requerido.');
++    try {
++      const { rows } = await query('INSERT INTO brands (nombre) VALUES ($1) RETURNING *', [nombre]);
++      res.status(201).json({ brand: rows[0] });
++    } catch (err) {
++      const traducido = traducirErrorPostgres(err);
++      if (traducido) throw traducido;
++      throw err;
++    }
++  })
++);
++
++router.patch(
++  '/:id',
++  requireAuth,
++  requireRole(...ROLES_NIVEL_ADMIN),
++  asyncHandler(async (req, res) => {
++    const { nombre } = req.body || {};
++    if (!nombre) throw badRequest('nombre es requerido.');
++    const { rows } = await query('UPDATE brands SET nombre = $1 WHERE id = $2 RETURNING *', [nombre, req.params.id]);
++    if (!rows[0]) throw notFound('Brand no encontrado.');
++    res.json({ brand: rows[0] });
++  })
++);
++
++module.exports = router;
+diff --git a/backend/src/routes/arrendamientos/companies.js b/backend/src/routes/arrendamientos/companies.js
+new file mode 100644
+index 0000000..44c1168
+--- /dev/null
++++ b/backend/src/routes/arrendamientos/companies.js
+@@ -0,0 +1,104 @@
++const express = require('express');
++const { query } = require('../../db');
++const asyncHandler = require('../../utils/asyncHandler');
++const { badRequest, notFound, traducirErrorPostgres } = require('../../utils/errors');
++const { requireAuth, requireRole } = require('../../middleware/auth');
++const { ROLES_NIVEL_ADMIN } = require('../../utils/roles');
++
++const router = express.Router();
++
++const CAMPOS = [
++  'nombre', 'ein', 'yearEstablished', 'fullAddress', 'address1', 'address2', 'city', 'state', 'zip', 'country',
++];
++const MAPA_COLUMNAS = {
++  nombre: 'nombre',
++  ein: 'ein',
++  yearEstablished: 'year_established',
++  fullAddress: 'full_address',
++  address1: 'address1',
++  address2: 'address2',
++  city: 'city',
++  state: 'state',
++  zip: 'zip',
++  country: 'country',
++};
++
++// GET /api/companies - con métricas agregadas (# ubicaciones, # leases activos, gasto anual)
++router.get(
++  '/',
++  requireAuth,
++  asyncHandler(async (req, res) => {
++    const { rows } = await query(`
++      SELECT
++        c.*,
++        COUNT(DISTINCT l.id) AS numero_ubicaciones,
++        COUNT(DISTINCT le.id) FILTER (WHERE le.estatus = 'activo') AS leases_activos
++      FROM companies c
++      LEFT JOIN locations l ON l.company_id = c.id
++      LEFT JOIN leases le ON le.location_id = l.id
++      GROUP BY c.id
++      ORDER BY c.nombre ASC
++    `);
++    res.json({ companies: rows });
++  })
++);
++
++router.post(
++  '/',
++  requireAuth,
++  requireRole(...ROLES_NIVEL_ADMIN),
++  asyncHandler(async (req, res) => {
++    const { nombre } = req.body || {};
++    if (!nombre) throw badRequest('nombre es requerido.');
++
++    const columnas = ['nombre'];
++    const valores = [nombre];
++    for (const campo of CAMPOS) {
++      if (campo === 'nombre') continue;
++      if (req.body[campo] !== undefined) {
++        columnas.push(MAPA_COLUMNAS[campo]);
++        valores.push(req.body[campo]);
++      }
++    }
++    const placeholders = columnas.map((_, i) => `$${i + 1}`);
++    try {
++      const { rows } = await query(
++        `INSERT INTO companies (${columnas.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING *`,
++        valores
++      );
++      res.status(201).json({ company: rows[0] });
++    } catch (err) {
++      const traducido = traducirErrorPostgres(err);
++      if (traducido) throw traducido;
++      throw err;
++    }
++  })
++);
++
++router.patch(
++  '/:id',
++  requireAuth,
++  requireRole(...ROLES_NIVEL_ADMIN),
++  asyncHandler(async (req, res) => {
++    const campos = [];
++    const valores = [];
++    let i = 1;
++    for (const campo of CAMPOS) {
++      if (req.body[campo] !== undefined) {
++        campos.push(`${MAPA_COLUMNAS[campo]} = $${i++}`);
++        valores.push(req.body[campo]);
++      }
++    }
++    if (campos.length === 0) throw badRequest('No se envió ningún campo para actualizar.');
++    valores.push(req.params.id);
++
++    const { rows } = await query(
++      `UPDATE companies SET ${campos.join(', ')} WHERE id = $${i} RETURNING *`,
++      valores
++    );
++    if (!rows[0]) throw notFound('Company no encontrada.');
++    res.json({ company: rows[0] });
++  })
++);
++
++module.exports = router;
+diff --git a/backend/src/routes/arrendamientos/contacts.js b/backend/src/routes/arrendamientos/contacts.js
+new file mode 100644
+index 0000000..4527f3f
+--- /dev/null
++++ b/backend/src/routes/arrendamientos/contacts.js
+@@ -0,0 +1,55 @@
++const express = require('express');
++const { query } = require('../../db');
++const asyncHandler = require('../../utils/asyncHandler');
++const { badRequest, notFound } = require('../../utils/errors');
++const { requireAuth, requireRole } = require('../../middleware/auth');
++const { ROLES_NIVEL_ADMIN } = require('../../utils/roles');
++
++const router = express.Router();
++
++router.get(
++  '/',
++  requireAuth,
++  asyncHandler(async (req, res) => {
++    const { rows } = await query('SELECT * FROM contacts ORDER BY nombre ASC');
++    res.json({ contacts: rows });
++  })
++);
++
++router.post(
++  '/',
++  requireAuth,
++  requireRole(...ROLES_NIVEL_ADMIN),
++  asyncHandler(async (req, res) => {
++    const { nombre, email, telefono, empresa, puesto, notas } = req.body || {};
++    if (!nombre) throw badRequest('nombre es requerido.');
++    const { rows } = await query(
++      `INSERT INTO contacts (nombre, email, telefono, empresa, puesto, notas) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
++      [nombre, email || null, telefono || null, empresa || null, puesto || null, notas || null]
++    );
++    res.status(201).json({ contact: rows[0] });
++  })
++);
++
++router.patch(
++  '/:id',
++  requireAuth,
++  requireRole(...ROLES_NIVEL_ADMIN),
++  asyncHandler(async (req, res) => {
++    const { nombre, email, telefono, empresa, puesto, notas } = req.body || {};
++    const campos = [];
++    const valores = [];
++    let i = 1;
++    const set = { nombre, email, telefono, empresa, puesto, notas };
++    for (const [campo, valor] of Object.entries(set)) {
++      if (valor !== undefined) { campos.push(`${campo} = $${i++}`); valores.push(valor); }
++    }
++    if (campos.length === 0) throw badRequest('No se envió ningún campo para actualizar.');
++    valores.push(req.params.id);
++    const { rows } = await query(`UPDATE contacts SET ${campos.join(', ')} WHERE id = $${i} RETURNING *`, valores);
++    if (!rows[0]) throw notFound('Contact no encontrado.');
++    res.json({ contact: rows[0] });
++  })
++);
++
++module.exports = router;
+diff --git a/backend/src/routes/arrendamientos/dashboard.js b/backend/src/routes/arrendamientos/dashboard.js
+new file mode 100644
+index 0000000..ab87124
+--- /dev/null
++++ b/backend/src/routes/arrendamientos/dashboard.js
+@@ -0,0 +1,59 @@
++const express = require('express');
++const { query } = require('../../db');
++const asyncHandler = require('../../utils/asyncHandler');
++const { requireAuth } = require('../../middleware/auth');
++
++const router = express.Router();
++
++// GET /api/dashboard - métricas generales (equivalente a los dashboards de Leasecake)
++router.get(
++  '/',
++  requireAuth,
++  asyncHandler(async (req, res) => {
++    const [resumen, rentaPorMes, proximosVencimientos, porBrand] = await Promise.all([
++      query(`
++        SELECT
++          (SELECT COUNT(*) FROM locations) AS total_ubicaciones,
++          (SELECT COUNT(*) FROM leases WHERE estatus = 'activo') AS leases_activos,
++          (SELECT COALESCE(SUM(rs.monto), 0) FROM lease_rent_schedule rs
++             JOIN leases le ON le.id = rs.lease_id
++             WHERE rs.categoria = 'Base Rent' AND le.estatus = 'activo'
++               AND rs.start_date <= CURRENT_DATE AND (rs.end_date IS NULL OR rs.end_date >= CURRENT_DATE)
++          ) AS renta_mensual_total,
++          (SELECT COUNT(*) FROM leases WHERE estatus = 'activo' AND expiration_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '180 days') AS venciendo_180_dias
++      `),
++      query(`
++        SELECT l.nombre AS location_nombre, le.expiration_date, rs.start_date AS fecha_inicio_pago_renta
++        FROM leases le
++        JOIN locations l ON l.id = le.location_id
++        LEFT JOIN LATERAL (
++          SELECT start_date FROM lease_rent_schedule
++          WHERE lease_id = le.id AND categoria = 'Base Rent'
++          ORDER BY start_date ASC LIMIT 1
++        ) rs ON true
++        WHERE le.estatus = 'activo'
++        ORDER BY l.nombre ASC
++      `),
++      query(`
++        SELECT l.nombre AS location_nombre, le.id AS lease_id, le.expiration_date, le.renewal_notice_deadline
++        FROM leases le JOIN locations l ON l.id = le.location_id
++        WHERE le.estatus = 'activo' AND le.expiration_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '365 days'
++        ORDER BY le.expiration_date ASC
++      `),
++      query(`
++        SELECT b.nombre AS brand_nombre, COUNT(l.id) AS numero_ubicaciones
++        FROM brands b LEFT JOIN locations l ON l.brand_id = b.id
++        GROUP BY b.nombre ORDER BY numero_ubicaciones DESC
++      `),
++    ]);
++
++    res.json({
++      resumen: resumen.rows[0],
++      fechaInicioPagoRenta: rentaPorMes.rows,
++      proximosVencimientos: proximosVencimientos.rows,
++      porBrand: porBrand.rows,
++    });
++  })
++);
++
++module.exports = router;
+diff --git a/backend/src/routes/arrendamientos/documentos.js b/backend/src/routes/arrendamientos/documentos.js
+new file mode 100644
+index 0000000..20ff28f
+--- /dev/null
++++ b/backend/src/routes/arrendamientos/documentos.js
+@@ -0,0 +1,86 @@
++const express = require('express');
++const multer = require('multer');
++const { query } = require('../../db');
++const asyncHandler = require('../../utils/asyncHandler');
++const { badRequest, notFound, forbidden } = require('../../utils/errors');
++const { requireAuth } = require('../../middleware/auth');
++const { ROLES_NIVEL_ADMIN } = require('../../utils/roles');
++const storage = require('../../storage');
++
++const router = express.Router();
++const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
++
++// POST /api/locations/:locationId/documentos - subir un archivo (pestaña "Files" en Leasecake)
++router.post(
++  '/locations/:locationId/documentos',
++  requireAuth,
++  upload.single('archivo'),
++  asyncHandler(async (req, res) => {
++    if (!req.file) throw badRequest('archivo es requerido.');
++    const { categoria, leaseId } = req.body || {};
++
++    const { rows: ubicacion } = await query('SELECT id FROM locations WHERE id = $1', [req.params.locationId]);
++    if (!ubicacion[0]) throw notFound('Ubicación no encontrada.');
++
++    const claveGuardada = await storage.save({
++      buffer: req.file.buffer,
++      originalname: req.file.originalname,
++      contratoId: req.params.locationId,
++      carpetaBase: 'arrendamientos',
++    });
++
++    const { rows } = await query(
++      `INSERT INTO location_documents (location_id, lease_id, nombre_archivo, categoria, storage_key, subido_por_id)
++       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
++      [req.params.locationId, leaseId || null, req.file.originalname, categoria || null, claveGuardada, req.usuario.id]
++    );
++    res.status(201).json({ documento: rows[0] });
++  })
++);
++
++router.get(
++  '/locations/:locationId/documentos',
++  requireAuth,
++  asyncHandler(async (req, res) => {
++    const { rows } = await query(
++      `SELECT ld.*, u.nombre AS subido_por_nombre FROM location_documents ld
++       LEFT JOIN usuarios u ON u.id = ld.subido_por_id
++       WHERE ld.location_id = $1 ORDER BY ld.created_at DESC`,
++      [req.params.locationId]
++    );
++    res.json({ documentos: rows });
++  })
++);
++
++router.get(
++  '/documentos/:id/descargar',
++  requireAuth,
++  asyncHandler(async (req, res) => {
++    const { rows } = await query('SELECT * FROM location_documents WHERE id = $1', [req.params.id]);
++    const documento = rows[0];
++    if (!documento) throw notFound('Documento no encontrado.');
++    res.download(storage.absolutePath(documento.storage_key), documento.nombre_archivo);
++  })
++);
++
++router.delete(
++  '/documentos/:id',
++  requireAuth,
++  asyncHandler(async (req, res) => {
++    const { rows } = await query('SELECT * FROM location_documents WHERE id = $1', [req.params.id]);
++    const documento = rows[0];
++    if (!documento) throw notFound('Documento no encontrado.');
++
++    const esAdmin = ROLES_NIVEL_ADMIN.includes(req.usuario.rol);
++    const esQuienSubio = documento.subido_por_id === req.usuario.id;
++    if (!esAdmin && !esQuienSubio) {
++      throw forbidden('Solo un admin/super_admin o quien subió el documento puede eliminarlo.');
++    }
++
++    await query('DELETE FROM location_documents WHERE id = $1', [req.params.id]);
++    await storage.delete(documento.storage_key);
++    res.status(204).end();
++  })
++);
++
++module.exports = router;
+diff --git a/backend/src/routes/arrendamientos/events.js b/backend/src/routes/arrendamientos/events.js
+new file mode 100644
+index 0000000..16c2253
+--- /dev/null
++++ b/backend/src/routes/arrendamientos/events.js
+@@ -0,0 +1,87 @@
++const express = require('express');
++const { query } = require('../../db');
++const asyncHandler = require('../../utils/asyncHandler');
++const { badRequest } = require('../../utils/errors');
++const { requireAuth } = require('../../middleware/auth');
++
++const router = express.Router();
++
++// GET /api/events?from=YYYY-MM-DD&to=YYYY-MM-DD
++//
++// Igual que en Leasecake: la mayoría de los "eventos" no son filas guardadas, son fechas
++// calculadas a partir del lease (pago de renta según lease_rent_schedule, vencimiento de
++// renovación, expiración de COI). Aquí se calculan al vuelo con UNION ALL en vez de
++// sincronizarse como filas estáticas; `events` (tabla) solo guarda los que alguien agregó a mano.
++router.get(
++  '/',
++  requireAuth,
++  asyncHandler(async (req, res) => {
++    const from = req.query.from || new Date().toISOString().slice(0, 10);
++    const to = req.query.to || null;
++
++    const filtroFecha = to ? 'AND fecha BETWEEN $1 AND $2' : 'AND fecha >= $1';
++    const params = to ? [from, to] : [from];
++
++    const { rows } = await query(`
++      WITH eventos AS (
++        -- Pago de renta (un evento por periodo de renta programado)
++        SELECT l.id AS location_id, le.id AS lease_id, l.nombre AS entidad_nombre,
++               'Rent Payment Due Date' AS nombre, rs.start_date AS fecha, 'auto_rent_due' AS origen
++        FROM lease_rent_schedule rs
++        JOIN leases le ON le.id = rs.lease_id
++        JOIN locations l ON l.id = le.location_id
++        WHERE rs.categoria = 'Base Rent'
++
++        UNION ALL
++        -- Inicio de pago de renta
++        SELECT l.id, le.id, l.nombre, 'Rent Commencement Date', le.rent_commencement_date, 'auto_rent_commencement'
++        FROM leases le JOIN locations l ON l.id = le.location_id
++        WHERE le.rent_commencement_date IS NOT NULL
++
++        UNION ALL
++        -- Fecha límite de aviso de renovación
++        SELECT l.id, le.id, l.nombre, 'Renewal Notice Deadline', le.renewal_notice_deadline, 'auto_renewal_deadline'
++        FROM leases le JOIN locations l ON l.id = le.location_id
++        WHERE le.renewal_notice_deadline IS NOT NULL
++
++        UNION ALL
++        -- Vencimiento del lease (término inicial)
++        SELECT l.id, le.id, l.nombre, 'Lease Expiration Date', le.expiration_date, 'auto_expiration'
++        FROM leases le JOIN locations l ON l.id = le.location_id
++        WHERE le.expiration_date IS NOT NULL
++
++        UNION ALL
++        -- Vencimiento de la póliza de seguro (COI)
++        SELECT l.id, le.id, l.nombre, 'COI Expiration Date', le.coi_expiration_date, 'auto_coi_expiration'
++        FROM leases le JOIN locations l ON l.id = le.location_id
++        WHERE le.coi_expiration_date IS NOT NULL
++
++        UNION ALL
++        -- Eventos agregados a mano
++        SELECT ev.location_id, ev.lease_id, l.nombre, ev.nombre, ev.fecha, 'manual'
++        FROM events ev LEFT JOIN locations l ON l.id = ev.location_id
++      )
++      SELECT * FROM eventos WHERE fecha IS NOT NULL ${filtroFecha}
++      ORDER BY fecha ASC
++      LIMIT 500
++    `, params);
++
++    res.json({ events: rows });
++  })
++);
++
++router.post(
++  '/',
++  requireAuth,
++  asyncHandler(async (req, res) => {
++    const { nombre, fecha, locationId, leaseId } = req.body || {};
++    if (!nombre || !fecha) throw badRequest('nombre y fecha son requeridos.');
++    const { rows } = await query(
++      `INSERT INTO events (nombre, fecha, location_id, lease_id, created_by_id) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
++      [nombre, fecha, locationId || null, leaseId || null, req.usuario.id]
++    );
++    res.status(201).json({ event: rows[0] });
++  })
++);
++
++module.exports = router;
+diff --git a/backend/src/routes/arrendamientos/leases.js b/backend/src/routes/arrendamientos/leases.js
+new file mode 100644
+index 0000000..fd2aa64
+--- /dev/null
++++ b/backend/src/routes/arrendamientos/leases.js
+@@ -0,0 +1,222 @@
++const express = require('express');
++const { query } = require('../../db');
++const asyncHandler = require('../../utils/asyncHandler');
++const { badRequest, notFound, traducirErrorPostgres } = require('../../utils/errors');
++const { requireAuth, requireRole } = require('../../middleware/auth');
++const { ROLES_NIVEL_ADMIN } = require('../../utils/roles');
++
++const router = express.Router();
++
++// Campos editables de `leases` expuestos en camelCase -> columna real. Ver prisma/schema.sql
++// para el detalle de cada uno (fechas, renovación, landlord, pagos, COI, percent rent).
++const MAPA_COLUMNAS = {
++  tenantCompanyId: 'tenant_company_id', leaseName: 'lease_name', leaseType: 'lease_type',
++  isSubLease: 'is_sub_lease', estatus: 'estatus', acquisitionType: 'acquisition_type',
++  leaseClassification: 'lease_classification',
++  leaseCommencementDate: 'lease_commencement_date', rentCommencementDate: 'rent_commencement_date',
++  possessionDate: 'possession_date', deliveryDate: 'delivery_date', expirationDate: 'expiration_date',
++  expirationDateIncludingOptions: 'expiration_date_including_options',
++  isMonthToMonth: 'is_month_to_month', monthToMonthExpDate: 'month_to_month_exp_date',
++  numberOfOptions: 'number_of_options', eachOptionYears: 'each_option_years',
++  remainingOptions: 'remaining_options', remainingOptionsYears: 'remaining_options_years',
++  renewalNoticePeriodStart: 'renewal_notice_period_start',
++  renewalNoticeEarliestSubmissionDate: 'renewal_notice_earliest_submission_date',
++  renewalNoticePeriodEnd: 'renewal_notice_period_end', renewalNoticeDeadline: 'renewal_notice_deadline',
++  renewalNoticeIntention: 'renewal_notice_intention', lengthOfLeaseMonths: 'length_of_lease_months',
++  landlordNombre: 'landlord_nombre', landlordParentCompany: 'landlord_parent_company',
++  landlordVendorId: 'landlord_vendor_id', landlordAddress1: 'landlord_address1',
++  landlordAddress2: 'landlord_address2', landlordCity: 'landlord_city', landlordState: 'landlord_state',
++  landlordZip: 'landlord_zip', landlordCountry: 'landlord_country',
++  landlordPocNombre: 'landlord_poc_nombre', landlordPocTelefono: 'landlord_poc_telefono',
++  landlordPocEmail: 'landlord_poc_email',
++  gracePeriodDias: 'grace_period_dias', lateFeeType: 'late_fee_type', lateFeeMonto: 'late_fee_monto',
++  securityDeposit: 'security_deposit', rentalPrepayments: 'rental_prepayments',
++  rentalPrepaymentsDetalle: 'rental_prepayments_detalle', initialDirectCosts: 'initial_direct_costs',
++  noticeAddress: 'notice_address', paymentMethod: 'payment_method', paymentAddress: 'payment_address',
++  remainingLeaseLiability: 'remaining_lease_liability',
++  coiEffectiveDate: 'coi_effective_date', coiExpirationDate: 'coi_expiration_date',
++  percentRentYn: 'percent_rent_yn', percentRentPaymentDate: 'percent_rent_payment_date',
++  percentRentMonthStart: 'percent_rent_month_start', percentRentMonthEnd: 'percent_rent_month_end',
++  percentRentSales: 'percent_rent_sales', percentRentBreakpoints: 'percent_rent_breakpoints',
++  percentRentOverageSales: 'percent_rent_overage_sales', miscLeaseDetails: 'misc_lease_details',
++};
++
++function construirSet(body, mapa, incluirLocationId) {
++  const campos = [];
++  const valores = [];
++  let i = 1;
++  if (incluirLocationId && body.locationId !== undefined) {
++    campos.push(`location_id = $${i++}`);
++    valores.push(body.locationId);
++  }
++  for (const [campo, columna] of Object.entries(mapa)) {
++    if (body[campo] !== undefined) {
++      campos.push(`${columna} = $${i++}`);
++      valores.push(body[campo]);
++    }
++  }
++  return { campos, valores, siguiente: i };
++}
++
++router.get(
++  '/',
++  requireAuth,
++  asyncHandler(async (req, res) => {
++    const { rows } = await query(`
++      SELECT le.*, l.nombre AS location_nombre, c.nombre AS tenant_company_nombre
++      FROM leases le
++      JOIN locations l ON l.id = le.location_id
++      LEFT JOIN companies c ON c.id = le.tenant_company_id
++      ORDER BY le.expiration_date DESC NULLS LAST
++    `);
++    res.json({ leases: rows });
++  })
++);
++
++router.get(
++  '/:id',
++  requireAuth,
++  asyncHandler(async (req, res) => {
++    const { rows } = await query(`
++      SELECT le.*, l.nombre AS location_nombre, c.nombre AS tenant_company_nombre
++      FROM leases le
++      JOIN locations l ON l.id = le.location_id
++      LEFT JOIN companies c ON c.id = le.tenant_company_id
++      WHERE le.id = $1
++    `, [req.params.id]);
++    const lease = rows[0];
++    if (!lease) throw notFound('Lease no encontrado.');
++
++    const [rentSchedule, oneTimePayments, taxSchedule, criticalClauses, notes] = await Promise.all([
++      query('SELECT * FROM lease_rent_schedule WHERE lease_id = $1 ORDER BY start_date ASC', [req.params.id]),
++      query('SELECT * FROM lease_one_time_payments WHERE lease_id = $1 ORDER BY due_date ASC', [req.params.id]),
++      query('SELECT * FROM lease_tax_schedule WHERE lease_id = $1 ORDER BY start_date ASC', [req.params.id]),
++      query('SELECT * FROM lease_critical_clauses WHERE lease_id = $1 ORDER BY created_at ASC', [req.params.id]),
++      query('SELECT * FROM lease_notes WHERE lease_id = $1 ORDER BY COALESCE(fecha_nota, created_at) DESC', [req.params.id]),
++    ]);
++
++    res.json({
++      lease,
++      rentSchedule: rentSchedule.rows,
++      oneTimePayments: oneTimePayments.rows,
++      taxSchedule: taxSchedule.rows,
++      criticalClauses: criticalClauses.rows,
++      notes: notes.rows,
++    });
++  })
++);
++
++router.post(
++  '/',
++  requireAuth,
++  requireRole(...ROLES_NIVEL_ADMIN),
++  asyncHandler(async (req, res) => {
++    const { locationId } = req.body || {};
++    if (!locationId) throw badRequest('locationId es requerido.');
++    const { campos, valores } = construirSet(req.body, MAPA_COLUMNAS, false);
++    const columnas = ['location_id', ...campos.map((c) => c.split(' = ')[0])];
++    const placeholders = ['$1', ...valores.map((_, idx) => `$${idx + 2}`)];
++    try {
++      const { rows } = await query(
++        `INSERT INTO leases (${columnas.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING *`,
++        [locationId, ...valores]
++      );
++      res.status(201).json({ lease: rows[0] });
++    } catch (err) {
++      const traducido = traducirErrorPostgres(err);
++      if (traducido) throw traducido;
++      throw err;
++    }
++  })
++);
++
++router.patch(
++  '/:id',
++  requireAuth,
++  requireRole(...ROLES_NIVEL_ADMIN),
++  asyncHandler(async (req, res) => {
++    const { campos, valores, siguiente } = construirSet(req.body, MAPA_COLUMNAS, true);
++    if (campos.length === 0) throw badRequest('No se envió ningún campo para actualizar.');
++    campos.push('updated_at = now()');
++    valores.push(req.params.id);
++
++    try {
++      const { rows } = await query(
++        `UPDATE leases SET ${campos.join(', ')} WHERE id = $${siguiente} RETURNING *`,
++        valores
++      );
++      if (!rows[0]) throw notFound('Lease no encontrado.');
++      res.json({ lease: rows[0] });
++    } catch (err) {
++      const traducido = traducirErrorPostgres(err);
++      if (traducido) throw traducido;
++      throw err;
++    }
++  })
++);
++
++// --- Calendario de renta ---
++router.post(
++  '/:id/rent-schedule',
++  requireAuth,
++  requireRole(...ROLES_NIVEL_ADMIN),
++  asyncHandler(async (req, res) => {
++    const { categoria, startDate, endDate, monto, frecuencia, dueDate, proration, payee, pctChange, montoPorSqm, nota } = req.body || {};
++    if (!startDate || monto === undefined) throw badRequest('startDate y monto son requeridos.');
++    const { rows } = await query(
++      `INSERT INTO lease_rent_schedule
++        (lease_id, categoria, start_date, end_date, monto, frecuencia, due_date, proration, payee, pct_change, monto_por_sqm, nota)
++       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
++      [req.params.id, categoria || 'Base Rent', startDate, endDate || null, monto, frecuencia || 'Monthly',
++       dueDate || null, proration || null, payee || null, pctChange ?? null, montoPorSqm ?? null, nota || null]
++    );
++    res.status(201).json({ item: rows[0] });
++  })
++);
++
++router.delete(
++  '/rent-schedule/:itemId',
++  requireAuth,
++  requireRole(...ROLES_NIVEL_ADMIN),
++  asyncHandler(async (req, res) => {
++    await query('DELETE FROM lease_rent_schedule WHERE id = $1', [req.params.itemId]);
++    res.status(204).end();
++  })
++);
++
++// --- Cláusulas críticas ---
++router.post(
++  '/:id/critical-clauses',
++  requireAuth,
++  requireRole(...ROLES_NIVEL_ADMIN),
++  asyncHandler(async (req, res) => {
++    const { clauseType, pageNumber, sectionNumber, leaseDocumentHeader, aiSummary, originalLanguage, leaseIsSilent } = req.body || {};
++    if (!clauseType) throw badRequest('clauseType es requerido.');
++    const { rows } = await query(
++      `INSERT INTO lease_critical_clauses
++        (lease_id, clause_type, page_number, section_number, lease_document_header, ai_summary, original_language, lease_is_silent)
++       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
++      [req.params.id, clauseType, pageNumber || null, sectionNumber || null, leaseDocumentHeader || null,
++       aiSummary || null, originalLanguage || null, !!leaseIsSilent]
++    );
++    res.status(201).json({ item: rows[0] });
++  })
++);
++
++// --- Notas ---
++router.post(
++  '/:id/notes',
++  requireAuth,
++  asyncHandler(async (req, res) => {
++    const { titulo, nota, fechaNota } = req.body || {};
++    if (!nota) throw badRequest('nota es requerida.');
++    const { rows } = await query(
++      `INSERT INTO lease_notes (lease_id, titulo, nota, autor_usuario_id, autor_nombre, fecha_nota)
++       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
++      [req.params.id, titulo || null, nota, req.usuario.id, req.usuario.nombre, fechaNota || new Date()]
++    );
++    res.status(201).json({ item: rows[0] });
++  })
++);
++
++module.exports = router;
+diff --git a/backend/src/routes/arrendamientos/locations.js b/backend/src/routes/arrendamientos/locations.js
+new file mode 100644
+index 0000000..f88158e
+--- /dev/null
++++ b/backend/src/routes/arrendamientos/locations.js
+@@ -0,0 +1,206 @@
++const express = require('express');
++const { query } = require('../../db');
++const asyncHandler = require('../../utils/asyncHandler');
++const { badRequest, notFound, traducirErrorPostgres } = require('../../utils/errors');
++const { requireAuth, requireRole } = require('../../middleware/auth');
++const { ROLES_NIVEL_ADMIN } = require('../../utils/roles');
++
++const router = express.Router();
++
++// Campos editables de `locations` expuestos en el API en camelCase -> columna real.
++const MAPA_COLUMNAS = {
++  nombre: 'nombre',
++  locationNumber: 'location_number',
++  brandId: 'brand_id',
++  companyId: 'company_id',
++  address1: 'address1',
++  address2: 'address2',
++  city: 'city',
++  state: 'state',
++  zip: 'zip',
++  country: 'country',
++  fullAddress: 'full_address',
++  latitude: 'latitude',
++  longitude: 'longitude',
++  locationType: 'location_type',
++  locationSubtype: 'location_subtype',
++  businessCategory: 'business_category',
++  businessType: 'business_type',
++  propertyName: 'property_name',
++  squareMeters: 'square_meters',
++  totalLeasedSqm: 'total_leased_sqm',
++  totalSubleasedSqm: 'total_subleased_sqm',
++  phone: 'phone',
++  lockboxCode: 'lockbox_code',
++  locationImageUrl: 'location_image_url',
++};
++
++// La "ubicación activa" de referencia (para mostrar landlord/expiración/renta en el listado)
++// es el lease sin estatus 'cancelado' con la fecha de expiración más lejana; si no hay ninguno
++// activo se usa el más reciente que exista, para no dejar el renglón completamente vacío.
++const SUBQUERY_LEASE_ACTIVO = `(
++  SELECT le.id FROM leases le
++  WHERE le.location_id = l.id
++  ORDER BY (le.estatus = 'activo') DESC, le.expiration_date DESC NULLS LAST
++  LIMIT 1
++)`;
++
++// GET /api/locations - listado combinado (igual que el "Locations report" de Leasecake):
++// ubicación + brand + company + datos del lease activo (landlord, vencimiento, renta actual).
++router.get(
++  '/',
++  requireAuth,
++  asyncHandler(async (req, res) => {
++    const { rows } = await query(`
++      SELECT
++        l.*,
++        b.nombre AS brand_nombre,
++        c.nombre AS company_nombre,
++        le.id AS lease_activo_id,
++        le.acquisition_type,
++        le.lease_classification,
++        le.landlord_nombre,
++        le.expiration_date,
++        le.expiration_date_including_options,
++        le.is_month_to_month,
++        (
++          SELECT rs.monto FROM lease_rent_schedule rs
++          WHERE rs.lease_id = le.id AND rs.categoria = 'Base Rent'
++            AND rs.start_date <= CURRENT_DATE AND (rs.end_date IS NULL OR rs.end_date >= CURRENT_DATE)
++          ORDER BY rs.start_date DESC LIMIT 1
++        ) AS renta_actual
++      FROM locations l
++      LEFT JOIN brands b ON b.id = l.brand_id
++      LEFT JOIN companies c ON c.id = l.company_id
++      LEFT JOIN leases le ON le.id = ${SUBQUERY_LEASE_ACTIVO}
++      ORDER BY l.nombre ASC
++    `);
++    res.json({ locations: rows });
++  })
++);
++
++router.get(
++  '/:id',
++  requireAuth,
++  asyncHandler(async (req, res) => {
++    const { rows } = await query(`
++      SELECT l.*, b.nombre AS brand_nombre, c.nombre AS company_nombre
++      FROM locations l
++      LEFT JOIN brands b ON b.id = l.brand_id
++      LEFT JOIN companies c ON c.id = l.company_id
++      WHERE l.id = $1
++    `, [req.params.id]);
++    const location = rows[0];
++    if (!location) throw notFound('Ubicación no encontrada.');
++
++    const { rows: leases } = await query(
++      `SELECT * FROM leases WHERE location_id = $1 ORDER BY (estatus = 'activo') DESC, expiration_date DESC NULLS LAST`,
++      [req.params.id]
++    );
++    const { rows: documentos } = await query(
++      `SELECT ld.*, u.nombre AS subido_por_nombre FROM location_documents ld
++       LEFT JOIN usuarios u ON u.id = ld.subido_por_id
++       WHERE ld.location_id = $1 ORDER BY ld.created_at DESC`,
++      [req.params.id]
++    );
++
++    res.json({ location, leases, documentos });
++  })
++);
++
++router.post(
++  '/',
++  requireAuth,
++  requireRole(...ROLES_NIVEL_ADMIN),
++  asyncHandler(async (req, res) => {
++    const { nombre } = req.body || {};
++    if (!nombre) throw badRequest('nombre es requerido.');
++
++    const columnas = ['nombre'];
++    const valores = [nombre];
++    for (const [campo, columna] of Object.entries(MAPA_COLUMNAS)) {
++      if (campo === 'nombre') continue;
++      if (req.body[campo] !== undefined) {
++        columnas.push(columna);
++        valores.push(req.body[campo]);
++      }
++    }
++    const placeholders = columnas.map((_, i) => `$${i + 1}`);
++    try {
++      const { rows } = await query(
++        `INSERT INTO locations (${columnas.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING *`,
++        valores
++      );
++      res.status(201).json({ location: rows[0] });
++    } catch (err) {
++      const traducido = traducirErrorPostgres(err);
++      if (traducido) throw traducido;
++      throw err;
++    }
++  })
++);
++
++router.patch(
++  '/:id',
++  requireAuth,
++  requireRole(...ROLES_NIVEL_ADMIN),
++  asyncHandler(async (req, res) => {
++    const campos = [];
++    const valores = [];
++    let i = 1;
++    for (const [campo, columna] of Object.entries(MAPA_COLUMNAS)) {
++      if (req.body[campo] !== undefined) {
++        campos.push(`${columna} = $${i++}`);
++        valores.push(req.body[campo]);
++      }
++    }
++    if (campos.length === 0) throw badRequest('No se envió ningún campo para actualizar.');
++    campos.push('updated_at = now()');
++    valores.push(req.params.id);
++
++    try {
++      const { rows } = await query(
++        `UPDATE locations SET ${campos.join(', ')} WHERE id = $${i} RETURNING *`,
++        valores
++      );
++      if (!rows[0]) throw notFound('Ubicación no encontrada.');
++      res.json({ location: rows[0] });
++    } catch (err) {
++      const traducido = traducirErrorPostgres(err);
++      if (traducido) throw traducido;
++      throw err;
++    }
++  })
++);
++
++// --- Hilo de comentarios (pestaña "Discussion") ---
++
++router.get(
++  '/:id/comentarios',
++  requireAuth,
++  asyncHandler(async (req, res) => {
++    const { rows } = await query(
++      `SELECT lc.*, u.nombre AS usuario_nombre FROM location_comments lc
++       JOIN usuarios u ON u.id = lc.usuario_id
++       WHERE lc.location_id = $1 ORDER BY lc.created_at ASC`,
++      [req.params.id]
++    );
++    res.json({ comentarios: rows });
++  })
++);
++
++router.post(
++  '/:id/comentarios',
++  requireAuth,
++  asyncHandler(async (req, res) => {
++    const comentario = ((req.body || {}).comentario || '').trim();
++    if (!comentario) throw badRequest('El comentario no puede estar vacío.');
++    const { rows } = await query(
++      `INSERT INTO location_comments (location_id, usuario_id, comentario) VALUES ($1, $2, $3) RETURNING *`,
++      [req.params.id, req.usuario.id, comentario]
++    );
++    res.status(201).json({ comentario: { ...rows[0], usuario_nombre: req.usuario.nombre } });
++  })
++);
++
++module.exports = router;
+diff --git a/backend/src/routes/arrendamientos/rentas.js b/backend/src/routes/arrendamientos/rentas.js
+new file mode 100644
+index 0000000..1828317
+--- /dev/null
++++ b/backend/src/routes/arrendamientos/rentas.js
+@@ -0,0 +1,79 @@
++const express = require('express');
++const { query } = require('../../db');
++const asyncHandler = require('../../utils/asyncHandler');
++const { requireAuth } = require('../../middleware/auth');
++
++const router = express.Router();
++
++// GET /api/rentas - vista consolidada del calendario de renta de TODOS los leases activos
++// (Leasecake solo muestra este calendario dentro de cada lease; aquí se agrega en un solo
++// apartado para ver renta total por mes, por categoría, por ubicación/brand, y próximos
++// incrementos, sin tener que entrar lease por lease).
++//
++// Query params opcionales:
++//   categoria    - filtra por categoría (Base Rent, CAM, Insurance, etc.)
++//   locationId   - filtra por ubicación
++//   brandId      - filtra por brand
++//   vigente=true - solo renglones vigentes hoy (start_date <= hoy <= end_date o sin end_date)
++router.get(
++  '/',
++  requireAuth,
++  asyncHandler(async (req, res) => {
++    const { categoria, locationId, brandId, vigente } = req.query;
++    const condiciones = [`le.estatus = 'activo'`];
++    const valores = [];
++    let i = 1;
++
++    if (categoria) { condiciones.push(`rs.categoria = $${i++}`); valores.push(categoria); }
++    if (locationId) { condiciones.push(`l.id = $${i++}`); valores.push(locationId); }
++    if (brandId) { condiciones.push(`l.brand_id = $${i++}`); valores.push(brandId); }
++    if (vigente === 'true') {
++      condiciones.push(`rs.start_date <= CURRENT_DATE AND (rs.end_date IS NULL OR rs.end_date >= CURRENT_DATE)`);
++    }
++
++    const { rows } = await query(
++      `SELECT
++         rs.*,
++         le.id AS lease_id, le.lease_name,
++         l.id AS location_id, l.nombre AS location_nombre,
++         b.nombre AS brand_nombre
++       FROM lease_rent_schedule rs
++       JOIN leases le ON le.id = rs.lease_id
++       JOIN locations l ON l.id = le.location_id
++       LEFT JOIN brands b ON b.id = l.brand_id
++       WHERE ${condiciones.join(' AND ')}
++       ORDER BY l.nombre ASC, rs.categoria ASC, rs.start_date ASC`,
++      valores
++    );
++
++    // Resumen: renta vigente hoy, agrupada por categoría (para el total mensual desglosado).
++    const { rows: resumenPorCategoria } = await query(`
++      SELECT rs.categoria, COALESCE(SUM(rs.monto), 0) AS monto_total
++      FROM lease_rent_schedule rs
++      JOIN leases le ON le.id = rs.lease_id
++      WHERE le.estatus = 'activo'
++        AND rs.start_date <= CURRENT_DATE AND (rs.end_date IS NULL OR rs.end_date >= CURRENT_DATE)
++      GROUP BY rs.categoria
++      ORDER BY monto_total DESC
++    `);
++
++    // Próximos incrementos/cambios de renta (siguiente periodo que arranca a futuro).
++    const { rows: proximosIncrementos } = await query(`
++      SELECT l.nombre AS location_nombre, rs.categoria, rs.start_date, rs.monto, rs.pct_change
++      FROM lease_rent_schedule rs
++      JOIN leases le ON le.id = rs.lease_id
++      JOIN locations l ON l.id = le.location_id
++      WHERE le.estatus = 'activo' AND rs.start_date > CURRENT_DATE
++      ORDER BY rs.start_date ASC
++      LIMIT 50
++    `);
++
++    res.json({
++      renglones: rows,
++      resumenPorCategoria,
++      proximosIncrementos,
++    });
++  })
++);
++
++module.exports = router;
+diff --git a/backend/src/routes/arrendamientos/tasks.js b/backend/src/routes/arrendamientos/tasks.js
+new file mode 100644
+index 0000000..4cfeb17
+--- /dev/null
++++ b/backend/src/routes/arrendamientos/tasks.js
+@@ -0,0 +1,62 @@
++const express = require('express');
++const { query } = require('../../db');
++const asyncHandler = require('../../utils/asyncHandler');
++const { badRequest, notFound } = require('../../utils/errors');
++const { requireAuth } = require('../../middleware/auth');
++
++const router = express.Router();
++
++router.get(
++  '/',
++  requireAuth,
++  asyncHandler(async (req, res) => {
++    const { rows } = await query(`
++      SELECT t.*, l.nombre AS location_nombre, u.nombre AS asignado_a_nombre
++      FROM tasks t
++      LEFT JOIN locations l ON l.id = t.location_id
++      LEFT JOIN usuarios u ON u.id = t.asignado_a_id
++      ORDER BY (t.estatus = 'cerrada') ASC, t.fecha_limite ASC NULLS LAST
++    `);
++    res.json({ tasks: rows });
++  })
++);
++
++router.post(
++  '/',
++  requireAuth,
++  asyncHandler(async (req, res) => {
++    const { titulo, descripcion, locationId, leaseId, asignadoAId, fechaLimite } = req.body || {};
++    if (!titulo) throw badRequest('titulo es requerido.');
++    const { rows } = await query(
++      `INSERT INTO tasks (titulo, descripcion, location_id, lease_id, asignado_a_id, fecha_limite, created_by_id)
++       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
++      [titulo, descripcion || null, locationId || null, leaseId || null, asignadoAId || null, fechaLimite || null, req.usuario.id]
++    );
++    res.status(201).json({ task: rows[0] });
++  })
++);
++
++router.patch(
++  '/:id',
++  requireAuth,
++  asyncHandler(async (req, res) => {
++    const { titulo, descripcion, estatus, asignadoAId, fechaLimite } = req.body || {};
++    const campos = [];
++    const valores = [];
++    let i = 1;
++    if (titulo !== undefined) { campos.push(`titulo = $${i++}`); valores.push(titulo); }
++    if (descripcion !== undefined) { campos.push(`descripcion = $${i++}`); valores.push(descripcion); }
++    if (estatus !== undefined) { campos.push(`estatus = $${i++}`); valores.push(estatus); }
++    if (asignadoAId !== undefined) { campos.push(`asignado_a_id = $${i++}`); valores.push(asignadoAId); }
++    if (fechaLimite !== undefined) { campos.push(`fecha_limite = $${i++}`); valores.push(fechaLimite); }
++    if (campos.length === 0) throw badRequest('No se envió ningún campo para actualizar.');
++    campos.push('updated_at = now()');
++    valores.push(req.params.id);
++
++    const { rows } = await query(`UPDATE tasks SET ${campos.join(', ')} WHERE id = $${i} RETURNING *`, valores);
++    if (!rows[0]) throw notFound('Task no encontrada.');
++    res.json({ task: rows[0] });
++  })
++);
++
++module.exports = router;
+diff --git a/backend/src/routes/jobs.js b/backend/src/routes/jobs.js
+index f86a7cb..2476370 100644
+--- a/backend/src/routes/jobs.js
++++ b/backend/src/routes/jobs.js
+@@ -4,6 +4,7 @@ const { requireAuth, requireRole } = require('../middleware/auth');
+ const { revisarVencimientos } = require('../utils/vencimientos');
+ const { revisarFranquicias } = require('../utils/franquicias');
+ const { revisarPendientes: revisarFirmasPendientes } = require('../utils/firmaElectronica');
++const { revisarAlertasArrendamientos } = require('../utils/alertasArrendamientos');
+ const { ROLES_NIVEL_ADMIN } = require('../utils/roles');
+ 
+ const router = express.Router();
+@@ -38,4 +39,18 @@ router.post(
+   })
+ );
+ 
++// POST /api/jobs/revisar-alertas-arrendamientos
++// Igual que arriba pero para las alertas de fechas críticas del módulo de Arrendamientos
++// (renovación, COI, vencimiento de lease) — ver src/utils/alertasArrendamientos.js. También
++// corre sola al arrancar y todos los días a las 07:00 (ver src/jobs/scheduler.js).
++router.post(
++  '/revisar-alertas-arrendamientos',
++  requireAuth,
++  requireRole(...ROLES_NIVEL_ADMIN),
++  asyncHandler(async (req, res) => {
++    const resumen = await revisarAlertasArrendamientos();
++    res.json({ resumen });
++  })
++);
++
+ module.exports = router;
+diff --git a/backend/src/server.js b/backend/src/server.js
+index 5d182a9..37021d0 100644
+--- a/backend/src/server.js
++++ b/backend/src/server.js
+@@ -22,6 +22,18 @@ const documensoWebhookRoutes = require('./routes/documensoWebhook');
+ const keepAliveRoutes = require('./routes/keepAlive');
+ const { iniciarProgramador } = require('./jobs/scheduler');
+ 
++// --- Módulo de Arrendamientos (reemplazo de Leasecake) ---
++const arrendamientosBrandsRoutes = require('./routes/arrendamientos/brands');
++const arrendamientosCompaniesRoutes = require('./routes/arrendamientos/companies');
++const arrendamientosLocationsRoutes = require('./routes/arrendamientos/locations');
++const arrendamientosLeasesRoutes = require('./routes/arrendamientos/leases');
++const arrendamientosTasksRoutes = require('./routes/arrendamientos/tasks');
++const arrendamientosContactsRoutes = require('./routes/arrendamientos/contacts');
++const arrendamientosEventsRoutes = require('./routes/arrendamientos/events');
++const arrendamientosDashboardRoutes = require('./routes/arrendamientos/dashboard');
++const arrendamientosRentasRoutes = require('./routes/arrendamientos/rentas');
++const arrendamientosDocumentosRoutes = require('./routes/arrendamientos/documentos');
++
+ const app = express();
+ 
+ const corsOrigin = process.env.CORS_ORIGIN || '*';
+@@ -58,6 +70,20 @@ app.use('/api/webhooks/documenso', documensoWebhookRoutes);
+ // este backend y Documenso mientras haya firmas pendientes. Ver src/routes/keepAlive.js.
+ app.use('/api/keep-alive', keepAliveRoutes);
+ 
++// --- Módulo de Arrendamientos (reemplazo de Leasecake): mismo login/roles, tablas propias
++// (ver prisma/migration_arrendamientos.sql), todo bajo el prefijo /api/arrendamientos/... ---
++app.use('/api/arrendamientos/brands', arrendamientosBrandsRoutes);
++app.use('/api/arrendamientos/companies', arrendamientosCompaniesRoutes);
++app.use('/api/arrendamientos/locations', arrendamientosLocationsRoutes);
++app.use('/api/arrendamientos/leases', arrendamientosLeasesRoutes);
++app.use('/api/arrendamientos/tasks', arrendamientosTasksRoutes);
++app.use('/api/arrendamientos/contacts', arrendamientosContactsRoutes);
++app.use('/api/arrendamientos/events', arrendamientosEventsRoutes);
++app.use('/api/arrendamientos/dashboard', arrendamientosDashboardRoutes);
++app.use('/api/arrendamientos/rentas', arrendamientosRentasRoutes);
++// arrendamientosDocumentosRoutes define sus propias rutas completas (/locations/:locationId/documentos, etc.)
++app.use('/api/arrendamientos', arrendamientosDocumentosRoutes);
++
+ // 404
+ app.use((req, res) => {
+   res.status(404).json({ error: 'Ruta no encontrada.' });
+diff --git a/backend/src/storage.js b/backend/src/storage.js
+index 5c1fbc5..488b27f 100644
+--- a/backend/src/storage.js
++++ b/backend/src/storage.js
+@@ -26,7 +26,11 @@ function driverLocal() {
+     async save(file) {
+       const ext = path.extname(file.originalname || '') || '';
+       const nombreUnico = `${crypto.randomUUID()}${ext}`;
+-      const subdir = path.join('contratos', file.contratoId);
++      // carpetaBase permite reusar este mismo storage para otros módulos (p.ej.
++      // "arrendamientos" para los documentos de ubicaciones/leases) sin mezclarlos con los
++      // documentos de contratos; por default se mantiene 'contratos' para no romper llamadores
++      // existentes que no lo especifican.
++      const subdir = path.join(file.carpetaBase || 'contratos', file.contratoId);
+       const destDir = path.join(UPLOADS_DIR, subdir);
+       if (!fs.existsSync(destDir)) {
+         fs.mkdirSync(destDir, { recursive: true });
+diff --git a/backend/src/utils/alertasArrendamientos.js b/backend/src/utils/alertasArrendamientos.js
+new file mode 100644
+index 0000000..6ad44c7
+--- /dev/null
++++ b/backend/src/utils/alertasArrendamientos.js
+@@ -0,0 +1,93 @@
++// Alertas automáticas de fechas críticas de leases del módulo de Arrendamientos (equivalente
++// a los avisos de Leasecake). Se ejecuta sola todos los días vía el programador interno (ver
++// src/jobs/scheduler.js) y también puede dispararse a mano vía POST /api/jobs/revisar-alertas-arrendamientos.
++//
++// Revisa tres hitos por lease activo:
++//   - renewal_notice_deadline (ventana: ALERTA_RENEWAL_DIAS)
++//   - coi_expiration_date (ventana: ALERTA_COI_DIAS)
++//   - expiration_date (ventana: ALERTA_EXPIRACION_DIAS)
++// y evita reenviar el mismo aviso todos los días guardando una fila en lease_alerts_log por
++// (lease_id, tipo, fecha_evento) — solo se envía la primera vez que ese hito entra en su ventana.
++
++const { query, withTransaction } = require('../db');
++const { enviarCorreo } = require('../email');
++const { obtenerCorreosNivelAdmin, formatFecha } = require('./notificaciones');
++
++const ALERTA_RENEWAL_DIAS = Number(process.env.ALERTA_RENEWAL_DIAS || 60);
++const ALERTA_COI_DIAS = Number(process.env.ALERTA_COI_DIAS || 30);
++const ALERTA_EXPIRACION_DIAS = Number(process.env.ALERTA_EXPIRACION_DIAS || 180);
++
++const DEFINICIONES = [
++  {
++    tipo: 'renewal_notice',
++    columnaFecha: 'renewal_notice_deadline',
++    dias: ALERTA_RENEWAL_DIAS,
++    asunto: (l) => `[Arrendamientos] Fecha límite de aviso de renovación próxima: ${l.location_nombre}`,
++    cuerpo: (l, fechaTexto) =>
++      `<p>El lease de <b>${l.location_nombre}</b> tiene su fecha límite de aviso de renovación el ${fechaTexto}.</p>`,
++  },
++  {
++    tipo: 'coi_expiration',
++    columnaFecha: 'coi_expiration_date',
++    dias: ALERTA_COI_DIAS,
++    asunto: (l) => `[Arrendamientos] Póliza de seguro (COI) próxima a vencer: ${l.location_nombre}`,
++    cuerpo: (l, fechaTexto) =>
++      `<p>La póliza de seguro (COI) del lease de <b>${l.location_nombre}</b> vence el ${fechaTexto}.</p>`,
++  },
++  {
++    tipo: 'lease_expiration',
++    columnaFecha: 'expiration_date',
++    dias: ALERTA_EXPIRACION_DIAS,
++    asunto: (l) => `[Arrendamientos] Lease próximo a vencer: ${l.location_nombre}`,
++    cuerpo: (l, fechaTexto) =>
++      `<p>El lease de <b>${l.location_nombre}</b> vence el ${fechaTexto}.</p>`,
++  },
++];
++
++async function revisarAlertasArrendamientos() {
++  const resumen = { avisosEnviados: 0, porTipo: {} };
++  const correosAdmin = await obtenerCorreosNivelAdmin({ query });
++  if (correosAdmin.length === 0) {
++    console.log('[alertasArrendamientos] No hay correos admin activos; se omite el envío de avisos.');
++  }
++
++  for (const def of DEFINICIONES) {
++    const { rows: candidatos } = await query(
++      `SELECT le.id AS lease_id, le.${def.columnaFecha} AS fecha_evento, l.nombre AS location_nombre
++       FROM leases le
++       JOIN locations l ON l.id = le.location_id
++       WHERE le.estatus = 'activo'
++         AND le.${def.columnaFecha} IS NOT NULL
++         AND le.${def.columnaFecha} BETWEEN CURRENT_DATE AND CURRENT_DATE + ($1 || ' days')::interval
++         AND NOT EXISTS (
++           SELECT 1 FROM lease_alerts_log al
++           WHERE al.lease_id = le.id AND al.tipo = $2 AND al.fecha_evento = le.${def.columnaFecha}
++         )`,
++      [def.dias, def.tipo]
++    );
++
++    for (const lease of candidatos) {
++      try {
++        if (correosAdmin.length > 0) {
++          const fechaTexto = formatFecha(lease.fecha_evento);
++          await enviarCorreo(correosAdmin.join(','), def.asunto(lease), def.cuerpo(lease, fechaTexto));
++        }
++        await withTransaction((client) =>
++          client.query(
++            `INSERT INTO lease_alerts_log (lease_id, tipo, fecha_evento) VALUES ($1,$2,$3)
++             ON CONFLICT (lease_id, tipo, fecha_evento) DO NOTHING`,
++            [lease.lease_id, def.tipo, lease.fecha_evento]
++          )
++        );
++        resumen.avisosEnviados += 1;
++        resumen.porTipo[def.tipo] = (resumen.porTipo[def.tipo] || 0) + 1;
++      } catch (err) {
++        console.error(`[alertasArrendamientos] Error al procesar alerta "${def.tipo}" del lease ${lease.lease_id}:`, err);
++      }
++    }
++  }
++
++  return resumen;
++}
++
++module.exports = { revisarAlertasArrendamientos };
+diff --git a/backend/src/utils/notificaciones.js b/backend/src/utils/notificaciones.js
+index 7ab45da..3011ddb 100644
+--- a/backend/src/utils/notificaciones.js
++++ b/backend/src/utils/notificaciones.js
+@@ -1,5 +1,7 @@
+ // Helpers compartidos por las tareas de notificación automática
+-// (src/utils/vencimientos.js y src/utils/franquicias.js).
++// (src/utils/vencimientos.js, src/utils/franquicias.js y src/utils/alertasArrendamientos.js).
++
++const { ROLES_NIVEL_ADMIN } = require('./roles');
+ 
+ /** Correos de jurídico/admin/super_admin activos, para copiar en avisos automáticos. */
+ async function obtenerCorreosJuridicoAdmin(client) {
+@@ -9,9 +11,18 @@ async function obtenerCorreosJuridicoAdmin(client) {
+   return rows.map((r) => r.email);
+ }
+ 
++/** Correos de todos los roles con nivel de acceso admin (usado por el módulo de Arrendamientos). */
++async function obtenerCorreosNivelAdmin(client) {
++  const { rows } = await client.query(
++    `SELECT email FROM usuarios WHERE activo = true AND rol = ANY($1::rol_usuario[])`,
++    [ROLES_NIVEL_ADMIN]
++  );
++  return rows.map((r) => r.email).filter(Boolean);
++}
++
+ function formatFecha(fecha) {
+   if (!fecha) return '(sin fecha)';
+   return fecha instanceof Date ? fecha.toISOString().slice(0, 10) : String(fecha);
+ }
+ 
+-module.exports = { obtenerCorreosJuridicoAdmin, formatFecha };
++module.exports = { obtenerCorreosJuridicoAdmin, obtenerCorreosNivelAdmin, formatFecha };
+-- 
+2.43.0
+

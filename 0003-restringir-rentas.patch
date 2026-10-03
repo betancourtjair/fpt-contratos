@@ -1,0 +1,151 @@
+From 903f0befe1bcac2ad98ab1fdbbacf84a4b9939f6 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 30 Sep 2026 10:49:38 -0600
+Subject: [PATCH] =?UTF-8?q?Restringir=20el=20apartado=20Rentas=20a=20Super?=
+ =?UTF-8?q?=20Admin/CEO/CFO/Jur=C3=ADdico?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+El resto del módulo de Arrendamientos sigue de lectura abierta a cualquier rol
+autenticado; solo Rentas (calendario de renta de todo el portafolio) se
+restringe, tanto en el backend (GET /api/arrendamientos/rentas) como en el
+front (ruta protegida + link de sidebar oculto para el resto de roles).
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015Y3fuwEXGpTBMqYhbFpd3F
+---
+ backend/src/routes/arrendamientos/rentas.js |  8 +++++++-
+ backend/src/utils/roles.js                  |  8 +++++++-
+ frontend/src/App.jsx                        | 14 +++++++++++++-
+ frontend/src/auth/AuthContext.jsx           |  8 ++++++--
+ frontend/src/components/Layout.jsx          |  4 ++--
+ 5 files changed, 35 insertions(+), 7 deletions(-)
+
+diff --git a/backend/src/routes/arrendamientos/rentas.js b/backend/src/routes/arrendamientos/rentas.js
+index 1828317..99309e0 100644
+--- a/backend/src/routes/arrendamientos/rentas.js
++++ b/backend/src/routes/arrendamientos/rentas.js
+@@ -1,7 +1,8 @@
+ const express = require('express');
+ const { query } = require('../../db');
+ const asyncHandler = require('../../utils/asyncHandler');
+-const { requireAuth } = require('../../middleware/auth');
++const { requireAuth, requireRole } = require('../../middleware/auth');
++const { ROLES_RENTAS } = require('../../utils/roles');
+ 
+ const router = express.Router();
+ 
+@@ -10,6 +11,10 @@ const router = express.Router();
+ // apartado para ver renta total por mes, por categoría, por ubicación/brand, y próximos
+ // incrementos, sin tener que entrar lease por lease).
+ //
++// Restringido a Super Admin/CEO/CFO/Jurídico (ROLES_RENTAS): a diferencia del resto del
++// módulo de Arrendamientos (lectura abierta a cualquier rol autenticado), este apartado
++// expone el detalle de renta de todo el portafolio.
++//
+ // Query params opcionales:
+ //   categoria    - filtra por categoría (Base Rent, CAM, Insurance, etc.)
+ //   locationId   - filtra por ubicación
+@@ -18,6 +23,7 @@ const router = express.Router();
+ router.get(
+   '/',
+   requireAuth,
++  requireRole(...ROLES_RENTAS),
+   asyncHandler(async (req, res) => {
+     const { categoria, locationId, brandId, vigente } = req.query;
+     const condiciones = [`le.estatus = 'activo'`];
+diff --git a/backend/src/utils/roles.js b/backend/src/utils/roles.js
+index 9339a71..75b6577 100644
+--- a/backend/src/utils/roles.js
++++ b/backend/src/utils/roles.js
+@@ -13,4 +13,10 @@ const ROLES_NIVEL_ADMIN = ['super_admin', 'admin', 'ceo', 'cfo', 'cabeza_juridic
+ // solicitud (ver ESTATUS_SOLICITUD).
+ const ROLES_AUTORIDAD_JURIDICA = ['super_admin', 'cabeza_juridico'];
+ 
+-module.exports = { ROLES_NIVEL_ADMIN, ROLES_AUTORIDAD_JURIDICA };
++// Quién puede ver el apartado "Rentas" del módulo de Arrendamientos (calendario de renta
++// consolidado de todas las ubicaciones): dato financiero sensible, así que se restringe a
++// Super Admin, CEO, CFO y Jurídico (Cabeza de Jurídico y Jurídico) — deliberadamente sin
++// "admin" genérico, a diferencia de ROLES_NIVEL_ADMIN.
++const ROLES_RENTAS = ['super_admin', 'ceo', 'cfo', 'cabeza_juridico', 'juridico'];
++
++module.exports = { ROLES_NIVEL_ADMIN, ROLES_AUTORIDAD_JURIDICA, ROLES_RENTAS };
+diff --git a/frontend/src/App.jsx b/frontend/src/App.jsx
+index e4a100f..c918627 100644
+--- a/frontend/src/App.jsx
++++ b/frontend/src/App.jsx
+@@ -31,6 +31,11 @@ import CompaniesArrendamientos from './pages/arrendamientos/Companies.jsx';
+ // (separado del resto de Contratos/Dashboard, que sí ven otros roles).
+ const ROLES_FRANQUICIAS = ['super_admin', 'admin', 'ceo', 'cfo', 'cabeza_juridico', 'juridico'];
+ 
++// El apartado "Rentas" (dentro de Arrendamientos) expone el calendario de renta de todo el
++// portafolio, así que se restringe a Super Admin/CEO/CFO/Jurídico — a diferencia del resto del
++// módulo de Arrendamientos, que es de lectura abierta a cualquier rol autenticado.
++const ROLES_RENTAS = ['super_admin', 'ceo', 'cfo', 'cabeza_juridico', 'juridico'];
++
+ export default function App() {
+   return (
+     <Routes>
+@@ -93,7 +98,14 @@ export default function App() {
+         <Route path="arrendamientos/ubicaciones/:id" element={<LocationDetalle />} />
+         <Route path="arrendamientos/leases" element={<Leases />} />
+         <Route path="arrendamientos/leases/:id" element={<LeaseDetalle />} />
+-        <Route path="arrendamientos/rentas" element={<Rentas />} />
++        <Route
++          path="arrendamientos/rentas"
++          element={
++            <ProtectedRoute roles={ROLES_RENTAS}>
++              <Rentas />
++            </ProtectedRoute>
++          }
++        />
+         <Route path="arrendamientos/eventos" element={<EventsArrendamientos />} />
+         <Route path="arrendamientos/tareas" element={<TasksArrendamientos />} />
+         <Route path="arrendamientos/contactos" element={<ContactsArrendamientos />} />
+diff --git a/frontend/src/auth/AuthContext.jsx b/frontend/src/auth/AuthContext.jsx
+index 936e476..051075f 100644
+--- a/frontend/src/auth/AuthContext.jsx
++++ b/frontend/src/auth/AuthContext.jsx
+@@ -62,10 +62,14 @@ export function AuthProvider({ children }) {
+   const esAdmin = usuario && ['admin', 'super_admin', 'ceo', 'cfo', 'cabeza_juridico'].includes(usuario.rol);
+   // Quién puede entrar al módulo de Franquicias (dashboard, nueva solicitud, clubes).
+   const puedeFranquicias = usuario && ['super_admin', 'admin', 'ceo', 'cfo', 'cabeza_juridico', 'juridico'].includes(usuario.rol);
++  // Quién puede ver el apartado "Rentas" (calendario de renta consolidado de todo el
++  // portafolio): dato financiero sensible, restringido a Super Admin/CEO/CFO/Jurídico —
++  // deliberadamente sin "admin" genérico, a diferencia de esAdmin/puedeFranquicias.
++  const puedeVerRentas = usuario && ['super_admin', 'ceo', 'cfo', 'cabeza_juridico', 'juridico'].includes(usuario.rol);
+ 
+   const value = useMemo(
+-    () => ({ usuario, cargando, login, logout, esAdmin, puedeFranquicias, actualizarUsuario }),
+-    [usuario, cargando, login, logout, esAdmin, puedeFranquicias, actualizarUsuario]
++    () => ({ usuario, cargando, login, logout, esAdmin, puedeFranquicias, puedeVerRentas, actualizarUsuario }),
++    [usuario, cargando, login, logout, esAdmin, puedeFranquicias, puedeVerRentas, actualizarUsuario]
+   );
+ 
+   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+diff --git a/frontend/src/components/Layout.jsx b/frontend/src/components/Layout.jsx
+index dfe87fb..1ac9107 100644
+--- a/frontend/src/components/Layout.jsx
++++ b/frontend/src/components/Layout.jsx
+@@ -59,7 +59,7 @@ function SidebarSection({ id, titulo, abierta, onToggle, children }) {
+ }
+ 
+ export default function Layout() {
+-  const { usuario, logout, esAdmin, puedeFranquicias } = useAuth();
++  const { usuario, logout, esAdmin, puedeFranquicias, puedeVerRentas } = useAuth();
+   const [secciones, setSecciones] = useState(cargarSeccionesAbiertas);
+ 
+   function toggleSeccion(id) {
+@@ -118,7 +118,7 @@ export default function Layout() {
+           <NavItem to="/arrendamientos" end>Dashboard</NavItem>
+           <NavItem to="/arrendamientos/ubicaciones">Ubicaciones</NavItem>
+           <NavItem to="/arrendamientos/leases">Leases</NavItem>
+-          <NavItem to="/arrendamientos/rentas">Rentas</NavItem>
++          {puedeVerRentas && <NavItem to="/arrendamientos/rentas">Rentas</NavItem>}
+           <NavItem to="/arrendamientos/eventos">Eventos</NavItem>
+           <NavItem to="/arrendamientos/tareas">Tareas</NavItem>
+           <NavItem to="/arrendamientos/contactos">Contactos</NavItem>
+-- 
+2.43.0
+

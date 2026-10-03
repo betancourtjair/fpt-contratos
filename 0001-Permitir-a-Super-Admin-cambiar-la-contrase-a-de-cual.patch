@@ -1,0 +1,272 @@
+From c799dde6c1c8fa2f7c7d0ffd011e17931ce56c46 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 29 Sep 2026 15:34:12 -0600
+Subject: [PATCH] =?UTF-8?q?Permitir=20a=20Super=20Admin=20cambiar=20la=20c?=
+ =?UTF-8?q?ontrase=C3=B1a=20de=20cualquier=20usuario?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Nuevo endpoint PATCH /api/usuarios/:id/password (solo rol super_admin)
+que fija una contraseña nueva sin requerir la actual, a diferencia de
+POST /api/auth/cambiar-password. Pensado para soporte/recuperación de
+acceso y para casos como la cuenta de prueba de David Raya (CEO) antes
+de asignarle su usuario real.
+
+En Usuarios.jsx se agrega el botón "Cambiar contraseña" (visible solo
+para quien tiene el rol Super Admin) con un modal para escribir o
+generar la contraseña y decidir si se exige cambiarla en el siguiente
+inicio de sesión. Se notifica por correo al usuario afectado.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015Y3fuwEXGpTBMqYhbFpd3F
+---
+ backend/src/routes/usuarios.js        |  60 ++++++++++++
+ frontend/src/pages/admin/Usuarios.jsx | 132 ++++++++++++++++++++++++--
+ 2 files changed, 185 insertions(+), 7 deletions(-)
+
+diff --git a/backend/src/routes/usuarios.js b/backend/src/routes/usuarios.js
+index 51bf8f2..d57d6e0 100644
+--- a/backend/src/routes/usuarios.js
++++ b/backend/src/routes/usuarios.js
+@@ -1,8 +1,10 @@
+ const express = require('express');
++const bcrypt = require('bcrypt');
+ const { query } = require('../db');
+ const asyncHandler = require('../utils/asyncHandler');
+ const { badRequest, notFound, traducirErrorPostgres } = require('../utils/errors');
+ const { requireAuth, requireRole } = require('../middleware/auth');
++const { enviarCorreo } = require('../email');
+ 
+ const router = express.Router();
+ const ROLES_VALIDOS = ['super_admin', 'admin', 'juridico', 'aprobador', 'solicitante', 'lectura'];
+@@ -87,4 +89,62 @@ router.patch(
+   })
+ );
+ 
++// PATCH /api/usuarios/:id/password - solo super_admin puede fijarle una contraseña nueva a
++// cualquier usuario, sin necesidad de conocer la actual (a diferencia de
++// POST /api/auth/cambiar-password, pensado para que cada quien cambie la suya). Pensado para
++// soporte: recuperar acceso a alguien que se quedó fuera, o (como en este caso) fijar la
++// contraseña de una cuenta de prueba antes de asignarla a su usuario real.
++router.patch(
++  '/:id/password',
++  requireAuth,
++  requireRole('super_admin'),
++  asyncHandler(async (req, res) => {
++    const { id } = req.params;
++    const { passwordNueva, debeCambiarPassword } = req.body || {};
++
++    if (!passwordNueva || String(passwordNueva).length < 8) {
++      throw badRequest('La nueva contraseña debe tener al menos 8 caracteres.');
++    }
++
++    const { rows: existentes } = await query('SELECT * FROM usuarios WHERE id = $1', [id]);
++    const usuario = existentes[0];
++    if (!usuario) throw notFound('Usuario no encontrado.');
++
++    // Por default se exige cambiarla en el siguiente inicio de sesión, igual que en el alta;
++    // quien tiene el rol super_admin puede desmarcarlo si de verdad quiere dejarla fija.
++    const forzarCambio = debeCambiarPassword !== false;
++    const nuevoHash = await bcrypt.hash(passwordNueva, 10);
++
++    const { rows } = await query(
++      `UPDATE usuarios SET password_hash = $1, debe_cambiar_password = $2, updated_at = now()
++       WHERE id = $3 RETURNING *`,
++      [nuevoHash, forzarCambio, id]
++    );
++
++    // Aviso por correo de que su contraseña cambió; nunca debe impedir que la operación se
++    // reporte como exitosa si el envío falla.
++    try {
++      await enviarCorreo(
++        usuario.email,
++        'Tu contraseña de FPT Contratos fue actualizada',
++        `<p style="margin:0 0 16px;">Un administrador estableció una nueva contraseña temporal para tu cuenta en <b>FPT Contratos</b>.</p>
++         <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#f6f2fa; border-radius:8px; margin:0 0 20px;">
++           <tr>
++             <td style="padding:16px 18px; font-size:14px; line-height:1.8;">
++               <b>Usuario (correo):</b> ${usuario.email}<br/>
++               <b>Contraseña temporal:</b> ${passwordNueva}
++             </td>
++           </tr>
++         </table>
++         ${forzarCambio ? '<p style="margin:0 0 20px;">Al iniciar sesión se te pedirá cambiarla.</p>' : ''}
++         <p style="margin:0;">Si no esperabas este cambio, contacta a un administrador.</p>`
++      );
++    } catch (err) {
++      console.error('Error enviando correo de cambio de contraseña:', err);
++    }
++
++    res.json({ usuario: serializarUsuario(rows[0]) });
++  })
++);
++
+ module.exports = router;
+diff --git a/frontend/src/pages/admin/Usuarios.jsx b/frontend/src/pages/admin/Usuarios.jsx
+index e6eddf7..f374999 100644
+--- a/frontend/src/pages/admin/Usuarios.jsx
++++ b/frontend/src/pages/admin/Usuarios.jsx
+@@ -41,6 +41,14 @@ export default function Usuarios() {
+   const [errorModal, setErrorModal] = useState('');
+   const [creando, setCreando] = useState(false);
+ 
++  // Modal de "Super Admin" para fijarle una contraseña nueva a cualquier usuario sin
++  // conocer la actual (soporte / recuperación de acceso).
++  const [usuarioPasswordObjetivo, setUsuarioPasswordObjetivo] = useState(null);
++  const [nuevaPassword, setNuevaPassword] = useState('');
++  const [forzarCambioPassword, setForzarCambioPassword] = useState(true);
++  const [errorModalPassword, setErrorModalPassword] = useState('');
++  const [guardandoPassword, setGuardandoPassword] = useState(false);
++
+   async function cargar() {
+     setCargando(true);
+     setError('');
+@@ -139,6 +147,46 @@ export default function Usuarios() {
+     }
+   }
+ 
++  function abrirModalPassword(u) {
++    setUsuarioPasswordObjetivo(u);
++    setNuevaPassword('');
++    setForzarCambioPassword(true);
++    setErrorModalPassword('');
++  }
++
++  function cerrarModalPassword() {
++    if (guardandoPassword) return;
++    setUsuarioPasswordObjetivo(null);
++  }
++
++  function generarPasswordAleatoria() {
++    const alfabeto = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
++    let pass = '';
++    for (let i = 0; i < 12; i++) pass += alfabeto[Math.floor(Math.random() * alfabeto.length)];
++    setNuevaPassword(pass);
++  }
++
++  async function guardarNuevaPassword(e) {
++    e.preventDefault();
++    setErrorModalPassword('');
++    if (!nuevaPassword || nuevaPassword.length < 8) {
++      setErrorModalPassword('La contraseña debe tener al menos 8 caracteres.');
++      return;
++    }
++    setGuardandoPassword(true);
++    try {
++      await api.patch(`/usuarios/${usuarioPasswordObjetivo.id}/password`, {
++        passwordNueva: nuevaPassword,
++        debeCambiarPassword: forzarCambioPassword,
++      });
++      setUsuarioPasswordObjetivo(null);
++    } catch (err) {
++      setErrorModalPassword(err.message || 'No se pudo cambiar la contraseña.');
++    } finally {
++      setGuardandoPassword(false);
++    }
++  }
++
+   async function toggleActivo(u) {
+     setGuardandoId(u.id);
+     setError('');
+@@ -221,13 +269,24 @@ export default function Usuarios() {
+                         </span>
+                       </td>
+                       <td>
+-                        <button
+-                          className="icon-btn"
+-                          disabled={guardandoId === u.id || esYo}
+-                          onClick={() => toggleActivo(u)}
+-                        >
+-                          {u.activo !== false ? 'Desactivar' : 'Activar'}
+-                        </button>
++                        <div style={{ display: 'flex', gap: 8 }}>
++                          <button
++                            className="icon-btn"
++                            disabled={guardandoId === u.id || esYo}
++                            onClick={() => toggleActivo(u)}
++                          >
++                            {u.activo !== false ? 'Desactivar' : 'Activar'}
++                          </button>
++                          {esSuperAdmin && (
++                            <button
++                              className="icon-btn"
++                              disabled={guardandoId === u.id || esYo}
++                              onClick={() => abrirModalPassword(u)}
++                            >
++                              Cambiar contraseña
++                            </button>
++                          )}
++                        </div>
+                       </td>
+                     </tr>
+                   );
+@@ -344,6 +403,65 @@ export default function Usuarios() {
+           </div>
+         </div>
+       )}
++
++      {usuarioPasswordObjetivo && (
++        <div className="modal-backdrop" onClick={cerrarModalPassword}>
++          <div className="modal" onClick={(e) => e.stopPropagation()}>
++            <h3>Cambiar contraseña</h3>
++            <p className="muted" style={{ marginTop: -8 }}>
++              Vas a establecer una nueva contraseña para <b>{usuarioPasswordObjetivo.nombre}</b> ({usuarioPasswordObjetivo.email}).
++              No necesitas conocer la contraseña actual.
++            </p>
++
++            {errorModalPassword && <div className="alert alert-error">{errorModalPassword}</div>}
++
++            <form onSubmit={guardarNuevaPassword}>
++              <div className="field">
++                <label htmlFor="reset-password">Nueva contraseña *</label>
++                <div style={{ display: 'flex', gap: 8 }}>
++                  <input
++                    id="reset-password"
++                    type="text"
++                    value={nuevaPassword}
++                    onChange={(e) => setNuevaPassword(e.target.value)}
++                    placeholder="Mínimo 8 caracteres"
++                    autoFocus
++                    style={{ flex: 1 }}
++                  />
++                  <button type="button" className="btn btn-secondary" onClick={generarPasswordAleatoria}>
++                    Generar
++                  </button>
++                </div>
++              </div>
++
++              <div className="field checkbox-row">
++                <input
++                  id="reset-debe-cambiar"
++                  type="checkbox"
++                  checked={forzarCambioPassword}
++                  onChange={(e) => setForzarCambioPassword(e.target.checked)}
++                />
++                <label htmlFor="reset-debe-cambiar" style={{ marginBottom: 0 }}>
++                  Pedir cambiarla en el siguiente inicio de sesión
++                </label>
++              </div>
++
++              <p className="muted" style={{ fontSize: 12, marginTop: -8 }}>
++                Se le enviará un correo a {usuarioPasswordObjetivo.email} avisando que su contraseña cambió.
++              </p>
++
++              <div className="modal-actions">
++                <button type="button" className="btn btn-secondary" onClick={cerrarModalPassword} disabled={guardandoPassword}>
++                  Cancelar
++                </button>
++                <button type="submit" className="btn btn-primary" disabled={guardandoPassword}>
++                  {guardandoPassword ? 'Guardando…' : 'Guardar contraseña'}
++                </button>
++              </div>
++            </form>
++          </div>
++        </div>
++      )}
+     </div>
+   );
+ }
+-- 
+2.43.0
+

@@ -17,15 +17,19 @@ router.use(requireAuth, requireRole(...ROLES_MODULO_FRANQUICIAS));
 // y no dice nada sobre si el punto está operando). Todo contrato subido se crea ya "activo" y
 // ya firmado (se firma a mano, se escanea y se sube), así que esta categoría es la que
 // realmente le importa al negocio día a día:
-//   - 'abierta'      -> ya hay fecha de próximo pago de regalías (solo se llena una vez que el
-//                       club realmente empieza a operar y a pagar regalías).
+//   - 'abierta'      -> fd.club_abierto = true (columna explícita; default true porque la
+//                       enorme mayoría del portafolio ya opera -- ver
+//                       migration_franquicia_club_abierto.sql). NO se infiere de
+//                       fecha_proximo_pago_regalias: ese campo es para el calendario de cobro
+//                       de regalías hacia adelante y nunca se llenó para el histórico, aunque
+//                       esos clubes llevan años abiertos.
 //   - 'falta_abrir'  -> no ha abierto y la fecha límite de apertura (Business Commencement
 //                       Deadline) ya pasó: incumplimiento de plazo contractual.
 //   - 'por_abrir'    -> no ha abierto pero su fecha límite todavía no llega (o no tiene fecha
 //                       límite capturada todavía).
 const CASE_CATEGORIA_APERTURA = `
   CASE
-    WHEN fd.fecha_proximo_pago_regalias IS NOT NULL THEN 'abierta'
+    WHEN fd.club_abierto = true THEN 'abierta'
     WHEN fd.fecha_limite_apertura IS NOT NULL AND fd.fecha_limite_apertura < CURRENT_DATE THEN 'falta_abrir'
     ELSE 'por_abrir'
   END

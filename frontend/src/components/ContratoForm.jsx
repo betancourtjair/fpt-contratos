@@ -17,10 +17,10 @@ const CAMPOS_FRANQUICIA_NUMERICOS = new Set([
 ]);
 const CAMPOS_FRANQUICIA_TEXTO = [
   'clubId', 'periodicidadPagoRegalias', 'fechaProximoPagoRegalias', 'territorio', 'direccionPunto',
-  'fechaLimiteApertura', 'condicionesRenovacion', 'fechaProximaAuditoria', 'polizasSeguroRequeridas',
-  'garanteNombre',
+  'fechaLimiteApertura', 'fechaApertura', 'condicionesRenovacion', 'fechaProximaAuditoria',
+  'polizasSeguroRequeridas', 'garanteNombre',
 ];
-const CAMPOS_FRANQUICIA_BOOLEAN = ['garantiaPersonal'];
+const CAMPOS_FRANQUICIA_BOOLEAN = ['garantiaPersonal', 'clubAbierto'];
 const CAMPOS_FRANQUICIA = [...CAMPOS_FRANQUICIA_NUMERICOS, ...CAMPOS_FRANQUICIA_TEXTO, ...CAMPOS_FRANQUICIA_BOOLEAN];
 
 /** Extrae y normaliza del objeto de valores del form solo los campos de franquicia,
@@ -188,6 +188,10 @@ export function contratoFormVacio() {
     diasAvisoVencimiento: '30',
     // Datos de franquicia (solo se usan/envían si el tipo de contrato es de franquicia).
     clubId: '',
+    // Una solicitud nueva normalmente es para un club que todavía no abre -- se marca a mano
+    // como abierto desde el expediente (pestaña de datos de franquicia) el día que sí abra.
+    clubAbierto: false,
+    fechaApertura: '',
     cuotaInicial: '',
     regaliasPorcentaje: '',
     fondoMercadeoPorcentaje: '',
@@ -882,6 +886,37 @@ export default function ContratoForm({ valores, onChange, errores = {}, tipos = 
             </select>
             {errores.clubId && <div className="error-text">{errores.clubId}</div>}
           </div>
+
+          <div className="field checkbox-row">
+            <input
+              id="clubAbierto"
+              type="checkbox"
+              checked={!!valores.clubAbierto}
+              disabled={disabled}
+              onChange={(e) => set('clubAbierto', e.target.checked)}
+            />
+            <label htmlFor="clubAbierto" style={{ marginBottom: 0 }}>El club ya abrió sus puertas</label>
+          </div>
+          <p className="muted" style={{ fontSize: 12.5, marginTop: -8, marginBottom: 14 }}>
+            Determina si el dashboard de Franquicias lo cuenta como "activa/abierta" en vez de
+            "por abrir" o "falta de abrir". Márcalo el día que el club realmente abra.
+          </p>
+
+          {valores.clubAbierto && (
+            <div className="field" style={{ maxWidth: 260 }}>
+              <label htmlFor="fechaApertura">Fecha de apertura</label>
+              <input
+                id="fechaApertura"
+                type="date"
+                value={valores.fechaApertura}
+                disabled={disabled}
+                onChange={(e) => set('fechaApertura', e.target.value)}
+              />
+              <p className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>
+                Fecha real (o tentativa) en que abrió. Se muestra en el expediente del club.
+              </p>
+            </div>
+          )}
 
           <h4 className="form-subheading">Términos financieros</h4>
           <div className="form-row-3">

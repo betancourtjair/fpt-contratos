@@ -10,7 +10,9 @@
     "seed": "node prisma/seed.js",
     "migrate:arrendamientos": "node prisma/migrate_arrendamientos.js",
     "migrate:franquicia-alertas": "node prisma/migrate_franquicia_alertas.js",
-    "fix:franquicias-firmado": "node prisma/marcar_franquicias_firmadas.js"
+    "fix:franquicias-firmado": "node prisma/marcar_franquicias_firmadas.js",
+    "migrate:franquicia-club-abierto": "node prisma/migrate_franquicia_club_abierto.js",
+    "fix:franquicias-club-abierto": "node prisma/marcar_clubes_no_abiertos.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

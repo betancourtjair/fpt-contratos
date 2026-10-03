@@ -1,0 +1,362 @@
+From 80c01000a8f9fd921052f3b43c1e3838f9bd4681 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 29 Sep 2026 15:41:38 -0600
+Subject: [PATCH] Permitir a Super Admin editar nombre/correo/rol de usuarios y
+ agregar roles CEO/CFO
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Nuevo botón "Editar" en Usuarios (solo visible para Super Admin) que abre
+un modal para cambiar nombre, correo y rol de cualquier usuario. El
+backend (PATCH /api/usuarios/:id) ahora acepta `email`, restringido a
+super_admin por ser el usuario de acceso; rol/activo/nombre/area/
+jefeDirecto siguen editables por admin+ como antes.
+
+Se agregan los roles "ceo" y "cfo" (ROLES_VALIDOS en usuarios.js y
+auth.js) como un "puesto" informativo — el flujo de autorización sigue
+identificando a estas personas por id fijo (aprobador_id), no por rol,
+así que esto no afecta el flujo ya configurado. Igual que super_admin,
+solo un super_admin puede asignar/crear estos roles (ROLES_SOLO_SUPER_ADMIN /
+ROLES_RESTRINGIDOS en backend y frontend). No se agregaron a la lista de
+"Por rol" del editor de flujos (FlujosAutorizacion.jsx), que sigue
+siendo solo para roles operativos reales.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015Y3fuwEXGpTBMqYhbFpd3F
+---
+ backend/src/routes/auth.js            |  11 +-
+ backend/src/routes/usuarios.js        |  29 ++++--
+ frontend/src/components/Layout.jsx    |   2 +
+ frontend/src/pages/admin/Usuarios.jsx | 145 ++++++++++++++++++++++++--
+ 4 files changed, 170 insertions(+), 17 deletions(-)
+
+diff --git a/backend/src/routes/auth.js b/backend/src/routes/auth.js
+index a57f691..babd8f9 100644
+--- a/backend/src/routes/auth.js
++++ b/backend/src/routes/auth.js
+@@ -9,7 +9,10 @@ const { enviarCorreo } = require('../email');
+ 
+ const router = express.Router();
+ 
+-const ROLES_VALIDOS = ['super_admin', 'admin', 'juridico', 'aprobador', 'solicitante', 'lectura'];
++const ROLES_VALIDOS = ['super_admin', 'admin', 'juridico', 'aprobador', 'solicitante', 'ceo', 'cfo', 'lectura'];
++// Igual que en usuarios.js: CEO/CFO son un "puesto" y, como super_admin, solo un super_admin
++// puede asignarlos (los pasos de flujo ya identifican a la persona fija por id, no por rol).
++const ROLES_SOLO_SUPER_ADMIN = ['super_admin', 'ceo', 'cfo'];
+ 
+ // URL del sitio para incluir en el correo de bienvenida. Configurable vía env (Render);
+ // si no se define, cae al dominio propio de FPT Contratos.
+@@ -63,9 +66,9 @@ router.post(
+     if (!ROLES_VALIDOS.includes(rolFinal)) {
+       throw badRequest(`rol inválido. Valores permitidos: ${ROLES_VALIDOS.join(', ')}.`);
+     }
+-    // Solo super_admin puede crear otro super_admin.
+-    if (rolFinal === 'super_admin' && req.usuario.rol !== 'super_admin') {
+-      throw badRequest('Solo un super_admin puede crear otro super_admin.');
++    // Solo super_admin puede crear otro super_admin, o un CEO/CFO.
++    if (ROLES_SOLO_SUPER_ADMIN.includes(rolFinal) && req.usuario.rol !== 'super_admin') {
++      throw badRequest(`Solo un super_admin puede crear un usuario con rol ${rolFinal}.`);
+     }
+     // Requerido desde el alta (no solo para solicitantes: cualquier persona puede algún día pedir
+     // un contrato, y así no queda en blanco por descuido). "null" explícito es una respuesta
+diff --git a/backend/src/routes/usuarios.js b/backend/src/routes/usuarios.js
+index d57d6e0..281900c 100644
+--- a/backend/src/routes/usuarios.js
++++ b/backend/src/routes/usuarios.js
+@@ -2,12 +2,16 @@ const express = require('express');
+ const bcrypt = require('bcrypt');
+ const { query } = require('../db');
+ const asyncHandler = require('../utils/asyncHandler');
+-const { badRequest, notFound, traducirErrorPostgres } = require('../utils/errors');
++const { badRequest, forbidden, notFound, traducirErrorPostgres } = require('../utils/errors');
+ const { requireAuth, requireRole } = require('../middleware/auth');
+ const { enviarCorreo } = require('../email');
+ 
+ const router = express.Router();
+-const ROLES_VALIDOS = ['super_admin', 'admin', 'juridico', 'aprobador', 'solicitante', 'lectura'];
++const ROLES_VALIDOS = ['super_admin', 'admin', 'juridico', 'aprobador', 'solicitante', 'ceo', 'cfo', 'lectura'];
++// CEO y CFO son, sobre todo, un "puesto" informativo (los pasos de flujo ya los referencian
++// como personas fijas vía aprobador_id, no por rol); pero como cualquier otro rol elevado,
++// solo un super_admin puede asignarlos — igual que super_admin.
++const ROLES_SOLO_SUPER_ADMIN = ['super_admin', 'ceo', 'cfo'];
+ 
+ function serializarUsuario(row) {
+   if (!row) return null;
+@@ -41,24 +45,36 @@ router.get(
+     })
+   );
+ 
+-// PATCH /api/usuarios/:id (rol, activo) - admin+
++// PATCH /api/usuarios/:id (rol, activo, nombre, area, jefeDirectoId - admin+; email y los roles
++// de ROLES_SOLO_SUPER_ADMIN - solo super_admin)
+ router.patch(
+   '/:id',
+   requireAuth,
+   requireRole('super_admin', 'admin'),
+   asyncHandler(async (req, res) => {
+     const { id } = req.params;
+-    const { rol, activo, nombre, area, jefeDirectoId } = req.body || {};
++    const { rol, activo, nombre, area, jefeDirectoId, email } = req.body || {};
+ 
+     if (rol !== undefined && !ROLES_VALIDOS.includes(rol)) {
+       throw badRequest(`rol inválido. Valores permitidos: ${ROLES_VALIDOS.join(', ')}.`);
+     }
+-    if (rol === 'super_admin' && req.usuario.rol !== 'super_admin') {
+-      throw badRequest('Solo un super_admin puede asignar el rol super_admin.');
++    if (rol !== undefined && ROLES_SOLO_SUPER_ADMIN.includes(rol) && req.usuario.rol !== 'super_admin') {
++      throw badRequest(`Solo un super_admin puede asignar el rol ${rol}.`);
+     }
+     if (jefeDirectoId !== undefined && jefeDirectoId !== null && String(jefeDirectoId) === String(id)) {
+       throw badRequest('Un usuario no puede ser su propio jefe directo.');
+     }
++    // El correo es el usuario de acceso (login); cambiarlo es más sensible que el resto de los
++    // campos, así que —a diferencia de rol/activo/nombre/area/jefeDirecto, editables por admin+—
++    // se reserva a super_admin.
++    if (email !== undefined) {
++      if (req.usuario.rol !== 'super_admin') {
++        throw forbidden('Solo un super_admin puede cambiar el correo de un usuario.');
++      }
++      if (!email || typeof email !== 'string' || !email.includes('@')) {
++        throw badRequest('El correo no es válido.');
++      }
++    }
+ 
+     const campos = [];
+     const valores = [];
+@@ -68,6 +84,7 @@ router.patch(
+     if (nombre !== undefined) { campos.push(`nombre = $${i++}`); valores.push(nombre); }
+     if (area !== undefined) { campos.push(`area = $${i++}`); valores.push(area); }
+     if (jefeDirectoId !== undefined) { campos.push(`jefe_directo_id = $${i++}`); valores.push(jefeDirectoId); }
++    if (email !== undefined) { campos.push(`email = $${i++}`); valores.push(String(email).toLowerCase()); }
+ 
+     if (campos.length === 0) throw badRequest('No se envió ningún campo para actualizar.');
+ 
+diff --git a/frontend/src/components/Layout.jsx b/frontend/src/components/Layout.jsx
+index 700375c..5799954 100644
+--- a/frontend/src/components/Layout.jsx
++++ b/frontend/src/components/Layout.jsx
+@@ -6,6 +6,8 @@ import fptLogoMark from '../assets/fpt-logo-mark.png';
+ const ROL_LABELS = {
+   super_admin: 'Super admin',
+   admin: 'Administrador',
++  ceo: 'CEO',
++  cfo: 'CFO',
+   juridico: 'Jurídico',
+   aprobador: 'Aprobador',
+   solicitante: 'Solicitante',
+diff --git a/frontend/src/pages/admin/Usuarios.jsx b/frontend/src/pages/admin/Usuarios.jsx
+index f374999..3c755d8 100644
+--- a/frontend/src/pages/admin/Usuarios.jsx
++++ b/frontend/src/pages/admin/Usuarios.jsx
+@@ -6,12 +6,18 @@ import { useAuth } from '../../auth/AuthContext.jsx';
+ const ROLES = [
+   { value: 'super_admin', label: 'Super admin' },
+   { value: 'admin', label: 'Administrador' },
++  { value: 'ceo', label: 'CEO' },
++  { value: 'cfo', label: 'CFO' },
+   { value: 'juridico', label: 'Jurídico' },
+   { value: 'aprobador', label: 'Aprobador' },
+   { value: 'solicitante', label: 'Solicitante' },
+   { value: 'lectura', label: 'Lectura' },
+ ];
+ 
++// Igual que en el backend: solo un super_admin puede asignar estos roles (CEO/CFO son, sobre
++// todo, un "puesto" — los pasos de flujo ya identifican a la persona fija por id, no por rol).
++const ROLES_RESTRINGIDOS = ['super_admin', 'ceo', 'cfo'];
++
+ // Sentinel del <select> de jefe directo para "esta persona no tiene" (dirección general) — se
+ // manda como jefeDirectoId: null, distinto de dejarlo sin tocar (por eso no puede ser '').
+ const SIN_JEFE_DIRECTO = '__sin_jefe_directo__';
+@@ -25,9 +31,9 @@ const NUEVO_USUARIO_VACIO = {
+ export default function Usuarios() {
+   const { usuario: usuarioActual } = useAuth();
+   const esSuperAdmin = usuarioActual?.rol === 'super_admin';
+-  // Un admin normal no puede crear ni asignar super_admin; solo otro super_admin puede.
++  // Un admin normal no puede crear ni asignar super_admin, CEO ni CFO; solo otro super_admin puede.
+   const rolesAsignables = useMemo(
+-    () => (esSuperAdmin ? ROLES : ROLES.filter((r) => r.value !== 'super_admin')),
++    () => (esSuperAdmin ? ROLES : ROLES.filter((r) => !ROLES_RESTRINGIDOS.includes(r.value))),
+     [esSuperAdmin]
+   );
+ 
+@@ -49,6 +55,15 @@ export default function Usuarios() {
+   const [errorModalPassword, setErrorModalPassword] = useState('');
+   const [guardandoPassword, setGuardandoPassword] = useState(false);
+ 
++  // Modal de "Super Admin" para editar nombre, correo y rol (incluido CEO/CFO) de cualquier
++  // usuario. El resto de la tabla (rol/jefe directo/activo) ya era editable inline para admin+;
++  // esto se agrega aparte porque el correo (usuario de acceso) es más sensible y se reserva a
++  // super_admin.
++  const [usuarioEditar, setUsuarioEditar] = useState(null);
++  const [formEditar, setFormEditar] = useState(null);
++  const [errorModalEditar, setErrorModalEditar] = useState('');
++  const [guardandoEditar, setGuardandoEditar] = useState(false);
++
+   async function cargar() {
+     setCargando(true);
+     setError('');
+@@ -187,6 +202,45 @@ export default function Usuarios() {
+     }
+   }
+ 
++  function abrirModalEditar(u) {
++    setUsuarioEditar(u);
++    setFormEditar({ nombre: u.nombre || '', email: u.email || '', rol: u.rol, area: u.area || '' });
++    setErrorModalEditar('');
++  }
++
++  function cerrarModalEditar() {
++    if (guardandoEditar) return;
++    setUsuarioEditar(null);
++  }
++
++  function actualizarCampoEditar(campo, valor) {
++    setFormEditar((prev) => ({ ...prev, [campo]: valor }));
++  }
++
++  async function guardarEdicion(e) {
++    e.preventDefault();
++    setErrorModalEditar('');
++    if (!formEditar.nombre || !formEditar.email) {
++      setErrorModalEditar('Nombre y correo son requeridos.');
++      return;
++    }
++    setGuardandoEditar(true);
++    try {
++      await api.patch(`/usuarios/${usuarioEditar.id}`, {
++        nombre: formEditar.nombre,
++        email: formEditar.email,
++        rol: formEditar.rol,
++        area: formEditar.area || null,
++      });
++      setUsuarioEditar(null);
++      await cargar();
++    } catch (err) {
++      setErrorModalEditar(err.message || 'No se pudo guardar los cambios.');
++    } finally {
++      setGuardandoEditar(false);
++    }
++  }
++
+   async function toggleActivo(u) {
+     setGuardandoId(u.id);
+     setError('');
+@@ -243,10 +297,11 @@ export default function Usuarios() {
+                           disabled={guardandoId === u.id || esYo}
+                           onChange={(e) => cambiarRol(u, e.target.value)}
+                         >
+-                          {/* Si el usuario ya es super_admin y quien mira la pantalla no lo es,
+-                              se conserva la opción actual aunque no pueda asignarla de nuevo. */}
+-                          {(u.rol === 'super_admin' && !esSuperAdmin
+-                            ? [ROLES[0], ...rolesAsignables]
++                          {/* Si el usuario ya tiene un rol restringido (super_admin/CEO/CFO) y quien
++                              mira la pantalla no es super_admin, se conserva la opción actual
++                              aunque no pueda asignarla de nuevo. */}
++                          {(ROLES_RESTRINGIDOS.includes(u.rol) && !esSuperAdmin
++                            ? [ROLES.find((r) => r.value === u.rol), ...rolesAsignables]
+                             : rolesAsignables
+                           ).map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                         </select>
+@@ -269,7 +324,7 @@ export default function Usuarios() {
+                         </span>
+                       </td>
+                       <td>
+-                        <div style={{ display: 'flex', gap: 8 }}>
++                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                           <button
+                             className="icon-btn"
+                             disabled={guardandoId === u.id || esYo}
+@@ -277,6 +332,15 @@ export default function Usuarios() {
+                           >
+                             {u.activo !== false ? 'Desactivar' : 'Activar'}
+                           </button>
++                          {esSuperAdmin && (
++                            <button
++                              className="icon-btn"
++                              disabled={guardandoId === u.id}
++                              onClick={() => abrirModalEditar(u)}
++                            >
++                              Editar
++                            </button>
++                          )}
+                           {esSuperAdmin && (
+                             <button
+                               className="icon-btn"
+@@ -462,6 +526,73 @@ export default function Usuarios() {
+           </div>
+         </div>
+       )}
++
++      {usuarioEditar && formEditar && (
++        <div className="modal-backdrop" onClick={cerrarModalEditar}>
++          <div className="modal" onClick={(e) => e.stopPropagation()}>
++            <h3>Editar usuario</h3>
++
++            {errorModalEditar && <div className="alert alert-error">{errorModalEditar}</div>}
++
++            <form onSubmit={guardarEdicion}>
++              <div className="field">
++                <label htmlFor="editar-nombre">Nombre completo *</label>
++                <input
++                  id="editar-nombre"
++                  type="text"
++                  value={formEditar.nombre}
++                  onChange={(e) => actualizarCampoEditar('nombre', e.target.value)}
++                  autoFocus
++                />
++              </div>
++
++              <div className="field">
++                <label htmlFor="editar-email">Correo electrónico *</label>
++                <input
++                  id="editar-email"
++                  type="email"
++                  value={formEditar.email}
++                  onChange={(e) => actualizarCampoEditar('email', e.target.value)}
++                  placeholder="nombre@fpt.com.mx"
++                />
++                <p className="hint" style={{ marginTop: 4, marginBottom: 0 }}>
++                  Es el usuario con el que inicia sesión; si lo cambias, deberá usar el nuevo correo la próxima vez.
++                </p>
++              </div>
++
++              <div className="field">
++                <label htmlFor="editar-rol">Rol *</label>
++                <select
++                  id="editar-rol"
++                  value={formEditar.rol}
++                  onChange={(e) => actualizarCampoEditar('rol', e.target.value)}
++                >
++                  {ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
++                </select>
++              </div>
++
++              <div className="field">
++                <label htmlFor="editar-area">Área (opcional)</label>
++                <input
++                  id="editar-area"
++                  type="text"
++                  value={formEditar.area}
++                  onChange={(e) => actualizarCampoEditar('area', e.target.value)}
++                />
++              </div>
++
++              <div className="modal-actions">
++                <button type="button" className="btn btn-secondary" onClick={cerrarModalEditar} disabled={guardandoEditar}>
++                  Cancelar
++                </button>
++                <button type="submit" className="btn btn-primary" disabled={guardandoEditar}>
++                  {guardandoEditar ? 'Guardando…' : 'Guardar cambios'}
++                </button>
++              </div>
++            </form>
++          </div>
++        </div>
++      )}
+     </div>
+   );
+ }
+-- 
+2.43.0
+

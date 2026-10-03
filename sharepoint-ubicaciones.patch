@@ -1,0 +1,592 @@
+From 7cdd5ccbf9126ea70703659059536799d5e39824 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 30 Sep 2026 23:48:37 -0600
+Subject: [PATCH] Leer/subir los documentos de Ubicaciones directo de
+ SharePoint (sin tabla local)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Los archivos de cada ubicación ya no se guardan en location_documents + disco: ahora
+backend/src/sharepointUbicaciones.js lee y escribe directo en la carpeta Ubicaciones/<nombre>
+del sitio GestorContratoslegal en SharePoint, vía Microsoft Graph — reutilizando la MISMA app
+de Azure AD y el mismo sitio que ya usa sharepointStorage.js para contrato_documentos (mismas
+variables de entorno MS_GRAPH_*/SHAREPOINT_SITE_*, sin configuración adicional si ese feature
+ya está activo en producción).
+
+- GET /locations/:id/documentos lista los archivos reales de SharePoint (raíz = Contrato
+  Master, subcarpetas = el resto de las categorías), con conteo agrupado igual que antes.
+- POST sube el archivo a SharePoint en la subcarpeta de la categoría elegida (o a la raíz si
+  no se elige ninguna: "sin etiqueta" = Contrato Master).
+- DELETE borra el archivo en SharePoint (el :id ahora es el driveItem id).
+- LocationDetalle.jsx: tabla de Archivos actualizada a los campos nuevos (nombre, tamaño,
+  modificado) y aviso si SharePoint no está configurado en el backend.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_015Y3fuwEXGpTBMqYhbFpd3F
+---
+ .../src/routes/arrendamientos/documentos.js   |  78 ++---
+ .../src/routes/arrendamientos/locations.js    |  10 +-
+ backend/src/sharepointUbicaciones.js          | 279 ++++++++++++++++++
+ .../pages/arrendamientos/LocationDetalle.jsx  |  49 +--
+ 4 files changed, 336 insertions(+), 80 deletions(-)
+ create mode 100644 backend/src/sharepointUbicaciones.js
+
+diff --git a/backend/src/routes/arrendamientos/documentos.js b/backend/src/routes/arrendamientos/documentos.js
+index a767c90..20d19ec 100644
+--- a/backend/src/routes/arrendamientos/documentos.js
++++ b/backend/src/routes/arrendamientos/documentos.js
+@@ -2,39 +2,37 @@ const express = require('express');
+ const multer = require('multer');
+ const { query } = require('../../db');
+ const asyncHandler = require('../../utils/asyncHandler');
+-const { badRequest, notFound, forbidden } = require('../../utils/errors');
++const { badRequest, notFound } = require('../../utils/errors');
+ const { requireAuth } = require('../../middleware/auth');
+-const { ROLES_NIVEL_ADMIN } = require('../../utils/roles');
+-const storage = require('../../storage');
++const sharepointUbicaciones = require('../../sharepointUbicaciones');
+ 
+ const router = express.Router();
+ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+ 
+-// POST /api/locations/:locationId/documentos - subir un archivo (pestaña "Files" en Leasecake)
++// Los documentos de cada ubicación (pestaña "Files" de Leasecake) viven directo en SharePoint
++// (carpeta Ubicaciones/<nombre de la ubicación>/<categoría>/), no en nuestra base de datos: se
++// migraron a mano desde Leasecake y SharePoint es la única fuente de verdad. Por eso estas rutas
++// solo resuelven el nombre de la ubicación y delegan todo a sharepointUbicaciones (ver ese
++// archivo). Si SharePoint no está configurado (faltan las variables MS_GRAPH_*/SHAREPOINT_*),
++// se devuelve la lista vacía en vez de tronar, para no romper la página de la ubicación.
++
++async function obtenerNombreUbicacion(locationId) {
++  const { rows } = await query('SELECT nombre FROM locations WHERE id = $1', [locationId]);
++  if (!rows[0]) throw notFound('Ubicación no encontrada.');
++  return rows[0].nombre;
++}
++
+ router.post(
+   '/locations/:locationId/documentos',
+   requireAuth,
+   upload.single('archivo'),
+   asyncHandler(async (req, res) => {
+     if (!req.file) throw badRequest('archivo es requerido.');
+-    const { categoria, leaseId } = req.body || {};
+-
+-    const { rows: ubicacion } = await query('SELECT id FROM locations WHERE id = $1', [req.params.locationId]);
+-    if (!ubicacion[0]) throw notFound('Ubicación no encontrada.');
++    const { categoria } = req.body || {};
++    const nombreUbicacion = await obtenerNombreUbicacion(req.params.locationId);
+ 
+-    const claveGuardada = await storage.save({
+-      buffer: req.file.buffer,
+-      originalname: req.file.originalname,
+-      contratoId: req.params.locationId,
+-      carpetaBase: 'arrendamientos',
+-    });
+-
+-    const { rows } = await query(
+-      `INSERT INTO location_documents (location_id, lease_id, nombre_archivo, categoria, storage_key, subido_por_id)
+-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+-      [req.params.locationId, leaseId || null, req.file.originalname, categoria || null, claveGuardada, req.usuario.id]
+-    );
+-    res.status(201).json({ documento: { ...rows[0], url: storage.getUrl(rows[0].storage_key) } });
++    const documento = await sharepointUbicaciones.subir(nombreUbicacion, categoria, req.file.originalname, req.file.buffer);
++    res.status(201).json({ documento });
+   })
+ );
+ 
+@@ -42,27 +40,9 @@ router.get(
+   '/locations/:locationId/documentos',
+   requireAuth,
+   asyncHandler(async (req, res) => {
+-    const { rows } = await query(
+-      `SELECT ld.*, u.nombre AS subido_por_nombre FROM location_documents ld
+-       LEFT JOIN usuarios u ON u.id = ld.subido_por_id
+-       WHERE ld.location_id = $1 ORDER BY ld.created_at DESC`,
+-      [req.params.locationId]
+-    );
+-    // `url` es la ruta estática servida por /uploads (ver server.js), sin auth — igual que los
+-    // documentos de contratos (src/components/DocumentosContrato.jsx) — así un <a href> normal
+-    // del frontend puede verla/descargarla sin tener que mandar el Bearer token.
+-    res.json({ documentos: rows.map((d) => ({ ...d, url: storage.getUrl(d.storage_key) })) });
+-  })
+-);
+-
+-router.get(
+-  '/documentos/:id/descargar',
+-  requireAuth,
+-  asyncHandler(async (req, res) => {
+-    const { rows } = await query('SELECT * FROM location_documents WHERE id = $1', [req.params.id]);
+-    const documento = rows[0];
+-    if (!documento) throw notFound('Documento no encontrado.');
+-    res.download(storage.absolutePath(documento.storage_key), documento.nombre_archivo);
++    const nombreUbicacion = await obtenerNombreUbicacion(req.params.locationId);
++    const { configurado, documentos } = await sharepointUbicaciones.listar(nombreUbicacion);
++    res.json({ documentos, sharepointConfigurado: configurado });
+   })
+ );
+ 
+@@ -70,18 +50,8 @@ router.delete(
+   '/documentos/:id',
+   requireAuth,
+   asyncHandler(async (req, res) => {
+-    const { rows } = await query('SELECT * FROM location_documents WHERE id = $1', [req.params.id]);
+-    const documento = rows[0];
+-    if (!documento) throw notFound('Documento no encontrado.');
+-
+-    const esAdmin = ROLES_NIVEL_ADMIN.includes(req.usuario.rol);
+-    const esQuienSubio = documento.subido_por_id === req.usuario.id;
+-    if (!esAdmin && !esQuienSubio) {
+-      throw forbidden('Solo un admin/super_admin o quien subió el documento puede eliminarlo.');
+-    }
+-
+-    await query('DELETE FROM location_documents WHERE id = $1', [req.params.id]);
+-    await storage.delete(documento.storage_key);
++    // :id es el driveItem id de SharePoint (string opaco), no un id de nuestra base de datos.
++    await sharepointUbicaciones.eliminar(req.params.id);
+     res.status(204).end();
+   })
+ );
+diff --git a/backend/src/routes/arrendamientos/locations.js b/backend/src/routes/arrendamientos/locations.js
+index f88158e..95559ac 100644
+--- a/backend/src/routes/arrendamientos/locations.js
++++ b/backend/src/routes/arrendamientos/locations.js
+@@ -97,14 +97,10 @@ router.get(
+       `SELECT * FROM leases WHERE location_id = $1 ORDER BY (estatus = 'activo') DESC, expiration_date DESC NULLS LAST`,
+       [req.params.id]
+     );
+-    const { rows: documentos } = await query(
+-      `SELECT ld.*, u.nombre AS subido_por_nombre FROM location_documents ld
+-       LEFT JOIN usuarios u ON u.id = ld.subido_por_id
+-       WHERE ld.location_id = $1 ORDER BY ld.created_at DESC`,
+-      [req.params.id]
+-    );
++    // Los documentos de la ubicación ya NO se leen de location_documents: viven directo en
++    // SharePoint y se obtienen aparte con GET /locations/:id/documentos (ver documentos.js).
+ 
+-    res.json({ location, leases, documentos });
++    res.json({ location, leases });
+   })
+ );
+ 
+diff --git a/backend/src/sharepointUbicaciones.js b/backend/src/sharepointUbicaciones.js
+new file mode 100644
+index 0000000..8212f41
+--- /dev/null
++++ b/backend/src/sharepointUbicaciones.js
+@@ -0,0 +1,279 @@
++// Documentos de cada ubicación (módulo de Arrendamientos, reemplazo de la pestaña "Files" de
++// Leasecake) leídos y escritos DIRECTO en SharePoint vía Microsoft Graph — usa la MISMA app de
++// Azure AD y el MISMO sitio (GestorContratoslegal) que ya usa sharepointStorage.js para los
++// documentos de contratos (ver ese archivo para cómo se otorgó el permiso Sites.Selected), pero
++// apuntando a la carpeta raíz "Ubicaciones" en vez de <Tipo de contrato>/<Folio>/.
++//
++// A diferencia de contrato_documentos, aquí NO hay un registro en la base de datos por cada
++// archivo: los archivos ya están en SharePoint (se migraron a mano desde Leasecake) y SharePoint
++// es la única fuente de verdad. Por eso este módulo solo lista/sube/borra directo ahí, sin tabla.
++//
++// Variables de entorno: las mismas 5 que sharepointStorage.js (MS_GRAPH_CLIENT_ID/SECRET/
++// TENANT_ID, SHAREPOINT_SITE_HOSTNAME, SHAREPOINT_SITE_PATH). Sin ellas, listar()/subir()
++// devuelven "no configurado" en vez de tronar, para no romper la página si falta configurar algo.
++
++const GRAPH_BASE = 'https://graph.microsoft.com/v1.0';
++const LOGIN_BASE = 'https://login.microsoftonline.com';
++const CARPETA_RAIZ = 'Ubicaciones';
++
++function configurado() {
++  return Boolean(
++    process.env.MS_GRAPH_CLIENT_ID &&
++      process.env.MS_GRAPH_CLIENT_SECRET &&
++      process.env.MS_GRAPH_TENANT_ID &&
++      process.env.SHAREPOINT_SITE_HOSTNAME &&
++      process.env.SHAREPOINT_SITE_PATH
++  );
++}
++
++let tokenCache = { accessToken: null, expiresAt: 0 };
++async function obtenerToken() {
++  const ahora = Date.now();
++  if (tokenCache.accessToken && tokenCache.expiresAt > ahora + 30_000) {
++    return tokenCache.accessToken;
++  }
++  const tenantId = process.env.MS_GRAPH_TENANT_ID;
++  const url = `${LOGIN_BASE}/${tenantId}/oauth2/v2.0/token`;
++  const body = new URLSearchParams({
++    client_id: process.env.MS_GRAPH_CLIENT_ID,
++    client_secret: process.env.MS_GRAPH_CLIENT_SECRET,
++    scope: 'https://graph.microsoft.com/.default',
++    grant_type: 'client_credentials',
++  });
++  const resp = await fetch(url, {
++    method: 'POST',
++    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
++    body,
++  });
++  if (!resp.ok) {
++    throw new Error(`No se pudo obtener token de Graph (${resp.status}): ${await resp.text().catch(() => '')}`);
++  }
++  const data = await resp.json();
++  tokenCache = { accessToken: data.access_token, expiresAt: Date.now() + (data.expires_in || 3600) * 1000 };
++  return tokenCache.accessToken;
++}
++
++let driveIdCache = null;
++async function obtenerDriveId(token) {
++  if (driveIdCache) return driveIdCache;
++  const hostname = process.env.SHAREPOINT_SITE_HOSTNAME;
++  const sitePath = process.env.SHAREPOINT_SITE_PATH;
++  const siteResp = await fetch(`${GRAPH_BASE}/sites/${hostname}:${sitePath}`, {
++    headers: { Authorization: `Bearer ${token}` },
++  });
++  if (!siteResp.ok) {
++    throw new Error(`No se pudo resolver el sitio de SharePoint (${siteResp.status}): ${await siteResp.text().catch(() => '')}`);
++  }
++  const site = await siteResp.json();
++  const driveResp = await fetch(`${GRAPH_BASE}/sites/${site.id}/drive`, {
++    headers: { Authorization: `Bearer ${token}` },
++  });
++  if (!driveResp.ok) {
++    throw new Error(`No se pudo resolver la biblioteca de documentos (${driveResp.status}): ${await driveResp.text().catch(() => '')}`);
++  }
++  const drive = await driveResp.json();
++  driveIdCache = drive.id;
++  return driveIdCache;
++}
++
++// Quita acentos y normaliza mayúsculas/espacios para poder emparejar el nombre de la ubicación
++// (como está en la base de datos, con acentos) contra el nombre de su carpeta en SharePoint
++// (subida a mano por el equipo, a veces sin acentos — ej. "Angelopolis" vs "Angelópolis").
++function normalizar(nombre) {
++  return String(nombre || '')
++    .normalize('NFD')
++    .replace(/[̀-ͯ]/g, '')
++    .toLowerCase()
++    .trim();
++}
++
++// Categoría (la que se ve/elige en el front) <-> nombre real de la subcarpeta en SharePoint.
++// "Contrato Master" no tiene subcarpeta: el archivo va directo en la raíz de la ubicación.
++const CATEGORIA_A_SUBCARPETA = {
++  'Convenio Modificatorio': 'Convenio Modificatorio',
++  'Depósito en Garantía': 'Depósito en Garantía',
++  'Mantenimiento de Plaza': 'Mantenimiento de Plaza',
++  'Renta Mensual': 'Renta Mensual',
++  Agua: 'Agua',
++  'CFE (Energía Eléctrica)': 'CFE (Energía Eléctrica)',
++  'Gas Natural': 'Gas Natural',
++  'Estoppel / Renta Variable': 'Estoppel (Renta Variable)',
++  Licencias: 'Licencias',
++  'Equipo de Gimnasio': 'Equipo de Gimnasio',
++  Otro: 'Otro',
++};
++const SUBCARPETA_A_CATEGORIA = new Map(
++  Object.entries(CATEGORIA_A_SUBCARPETA).map(([categoria, sub]) => [normalizar(sub), categoria])
++);
++
++function categoriaDesdeSubcarpeta(nombreSubcarpeta) {
++  if (!nombreSubcarpeta) return 'Contrato Master';
++  return SUBCARPETA_A_CATEGORIA.get(normalizar(nombreSubcarpeta)) || nombreSubcarpeta;
++}
++
++// Cache de 5 min de las carpetas de ubicación (evita listar la raíz "Ubicaciones" en cada
++// request; son ~63 carpetas que casi nunca cambian de nombre).
++let carpetasCache = { expiresAt: 0, porNombreNormalizado: new Map() };
++async function obtenerCarpetaUbicacion(token, driveId, nombreUbicacion) {
++  const ahora = Date.now();
++  if (carpetasCache.expiresAt < ahora) {
++    const url = `${GRAPH_BASE}/drives/${driveId}/root:/${encodeURIComponent(CARPETA_RAIZ)}:/children?$select=id,name,folder&$top=500`;
++    const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
++    if (resp.status === 404) {
++      carpetasCache = { expiresAt: ahora + 5 * 60_000, porNombreNormalizado: new Map() };
++    } else {
++      if (!resp.ok) throw new Error(`No se pudo listar la carpeta Ubicaciones (${resp.status}): ${await resp.text().catch(() => '')}`);
++      const data = await resp.json();
++      const mapa = new Map();
++      for (const it of data.value || []) {
++        if (it.folder) mapa.set(normalizar(it.name), it);
++      }
++      carpetasCache = { expiresAt: ahora + 5 * 60_000, porNombreNormalizado: mapa };
++    }
++  }
++  return carpetasCache.porNombreNormalizado.get(normalizar(nombreUbicacion)) || null;
++}
++
++async function listarHijos(token, driveId, itemId) {
++  const url = `${GRAPH_BASE}/drives/${driveId}/items/${itemId}/children?$select=id,name,folder,file,size,lastModifiedDateTime,webUrl&$top=500`;
++  const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
++  if (!resp.ok) throw new Error(`No se pudo listar archivos (${resp.status}): ${await resp.text().catch(() => '')}`);
++  const data = await resp.json();
++  return data.value || [];
++}
++
++function mapearArchivo(it, categoria) {
++  return {
++    id: it.id,
++    nombre: it.name,
++    categoria,
++    tamanoBytes: it.size ?? null,
++    modificado: it.lastModifiedDateTime || null,
++    url: it.webUrl,
++  };
++}
++
++/** Lista (recursivo, 1 nivel de subcarpetas de categoría) los documentos de una ubicación. */
++async function listar(nombreUbicacion) {
++  if (!configurado()) return { configurado: false, documentos: [] };
++  const token = await obtenerToken();
++  const driveId = await obtenerDriveId(token);
++  const carpeta = await obtenerCarpetaUbicacion(token, driveId, nombreUbicacion);
++  if (!carpeta) return { configurado: true, documentos: [] };
++
++  const hijos = await listarHijos(token, driveId, carpeta.id);
++  const documentos = [];
++  for (const it of hijos) {
++    if (it.file) {
++      documentos.push(mapearArchivo(it, 'Contrato Master'));
++    } else if (it.folder) {
++      const categoria = categoriaDesdeSubcarpeta(it.name);
++      const archivosSub = await listarHijos(token, driveId, it.id);
++      for (const af of archivosSub) {
++        if (af.file) documentos.push(mapearArchivo(af, categoria));
++      }
++    }
++  }
++  return { configurado: true, documentos };
++}
++
++function sanitizarSegmento(nombre) {
++  const limpio = String(nombre || '').replace(/[\\/:*?"<>|]/g, '-').trim();
++  return (limpio || 'Sin nombre').slice(0, 100);
++}
++
++/** Busca o crea una subcarpeta directa de `parentId`. */
++async function asegurarSubcarpeta(token, driveId, parentId, nombreSegmento) {
++  const segmento = sanitizarSegmento(nombreSegmento);
++  const base = `${GRAPH_BASE}/drives/${driveId}/items/${parentId}/children`;
++  const buscar = async () => {
++    const resp = await fetch(`${base}?$select=id,name,folder`, { headers: { Authorization: `Bearer ${token}` } });
++    if (!resp.ok) throw new Error(`No se pudo listar subcarpetas (${resp.status}): ${await resp.text().catch(() => '')}`);
++    const data = await resp.json();
++    return (data.value || []).find((it) => it.folder && normalizar(it.name) === normalizar(segmento)) || null;
++  };
++  const existente = await buscar();
++  if (existente) return existente.id;
++  const crearResp = await fetch(base, {
++    method: 'POST',
++    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
++    body: JSON.stringify({ name: segmento, folder: {}, '@microsoft.graph.conflictBehavior': 'fail' }),
++  });
++  if (crearResp.status === 409) {
++    const encontrada = await buscar();
++    if (!encontrada) throw new Error(`Conflicto creando la subcarpeta "${segmento}".`);
++    return encontrada.id;
++  }
++  if (!crearResp.ok) {
++    throw new Error(`No se pudo crear la subcarpeta "${segmento}" (${crearResp.status}): ${await crearResp.text().catch(() => '')}`);
++  }
++  const creada = await crearResp.json();
++  return creada.id;
++}
++
++async function subirArchivo(token, driveId, carpetaId, nombreArchivo, buffer) {
++  const sesionResp = await fetch(
++    `${GRAPH_BASE}/drives/${driveId}/items/${carpetaId}:/${encodeURIComponent(nombreArchivo)}:/createUploadSession`,
++    {
++      method: 'POST',
++      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
++      body: JSON.stringify({ item: { '@microsoft.graph.conflictBehavior': 'rename' } }),
++    }
++  );
++  if (!sesionResp.ok) {
++    throw new Error(`No se pudo iniciar la carga a SharePoint (${sesionResp.status}): ${await sesionResp.text().catch(() => '')}`);
++  }
++  const sesion = await sesionResp.json();
++  const subidaResp = await fetch(sesion.uploadUrl, {
++    method: 'PUT',
++    headers: {
++      'Content-Length': String(buffer.length),
++      'Content-Range': `bytes 0-${buffer.length - 1}/${buffer.length}`,
++    },
++    body: buffer,
++  });
++  if (!subidaResp.ok) {
++    throw new Error(`No se pudo completar la carga a SharePoint (${subidaResp.status}): ${await subidaResp.text().catch(() => '')}`);
++  }
++  return subidaResp.json();
++}
++
++/**
++ * Sube un documento a la ubicación. Si `categoria` es 'Contrato Master' (o viene vacía: "todo
++ * documento sin etiqueta es Master de arrendamiento"), va a la raíz de la carpeta de la
++ * ubicación; cualquier otra categoría va a su subcarpeta (se crea si no existe todavía).
++ */
++async function subir(nombreUbicacion, categoria, nombreArchivo, buffer) {
++  if (!configurado()) {
++    throw new Error('Falta configurar las variables de entorno de SharePoint/Microsoft Graph.');
++  }
++  const token = await obtenerToken();
++  const driveId = await obtenerDriveId(token);
++  const carpetaUbicacion = await obtenerCarpetaUbicacion(token, driveId, nombreUbicacion);
++  if (!carpetaUbicacion) {
++    throw new Error(`No existe la carpeta de "${nombreUbicacion}" dentro de Ubicaciones en SharePoint.`);
++  }
++
++  const subcarpetaNombre = categoria && categoria !== 'Contrato Master' ? CATEGORIA_A_SUBCARPETA[categoria] || categoria : null;
++  const carpetaDestinoId = subcarpetaNombre
++    ? await asegurarSubcarpeta(token, driveId, carpetaUbicacion.id, subcarpetaNombre)
++    : carpetaUbicacion.id;
++
++  const item = await subirArchivo(token, driveId, carpetaDestinoId, nombreArchivo, buffer);
++  return mapearArchivo(item, categoria || 'Contrato Master');
++}
++
++async function eliminar(itemId) {
++  if (!configurado()) return;
++  const token = await obtenerToken();
++  const driveId = await obtenerDriveId(token);
++  const resp = await fetch(`${GRAPH_BASE}/drives/${driveId}/items/${itemId}`, {
++    method: 'DELETE',
++    headers: { Authorization: `Bearer ${token}` },
++  });
++  if (!resp.ok && resp.status !== 404) {
++    throw new Error(`No se pudo eliminar el archivo (${resp.status}): ${await resp.text().catch(() => '')}`);
++  }
++}
++
++module.exports = { configurado, listar, subir, eliminar };
+diff --git a/frontend/src/pages/arrendamientos/LocationDetalle.jsx b/frontend/src/pages/arrendamientos/LocationDetalle.jsx
+index 0924b06..c2d7ef0 100644
+--- a/frontend/src/pages/arrendamientos/LocationDetalle.jsx
++++ b/frontend/src/pages/arrendamientos/LocationDetalle.jsx
+@@ -1,6 +1,6 @@
+ import { useEffect, useMemo, useState } from 'react';
+ import { Link, useNavigate, useParams } from 'react-router-dom';
+-import { api, unwrap, API_URL } from '../../api.js';
++import { api, unwrap } from '../../api.js';
+ import Spinner from '../../components/Spinner.jsx';
+ import UbicacionMapa from '../../components/UbicacionMapa.jsx';
+ import { useAuth } from '../../auth/AuthContext.jsx';
+@@ -8,21 +8,15 @@ import { formatFecha, formatFechaHora } from '../../utils.js';
+ import CamposForm from './CamposForm.jsx';
+ import { GRUPOS_LOCATION, ESTATUS_LEASE, CATEGORIAS_DOCUMENTO_LOCATION, valoresIniciales } from './campos.js';
+ 
+-function resolverUrl(url) {
+-  if (!url) return null;
+-  if (/^https?:\/\//i.test(url)) return url;
+-  const base = API_URL.replace(/\/api\/?$/, '');
+-  return `${base}${url.startsWith('/') ? '' : '/'}${url}`;
+-}
+-
+ export default function LocationDetalle() {
+   const { id } = useParams();
+   const navigate = useNavigate();
+-  const { usuario, esAdmin } = useAuth();
++  const { esAdmin } = useAuth();
+ 
+   const [location, setLocation] = useState(null);
+   const [leases, setLeases] = useState([]);
+   const [documentos, setDocumentos] = useState([]);
++  const [sharepointConfigurado, setSharepointConfigurado] = useState(true);
+   const [comentarios, setComentarios] = useState([]);
+   const [brands, setBrands] = useState([]);
+   const [companies, setCompanies] = useState([]);
+@@ -61,6 +55,7 @@ export default function LocationDetalle() {
+       setLocation(d.location);
+       setLeases(d.leases || []);
+       setDocumentos(unwrap(dDocs, 'documentos') || []);
++      setSharepointConfigurado(dDocs?.sharepointConfigurado !== false);
+       setComentarios(unwrap(dComs, 'comentarios') || []);
+       setBrands(unwrap(db, 'brands') || []);
+       setCompanies(unwrap(dc, 'companies') || []);
+@@ -148,6 +143,7 @@ export default function LocationDetalle() {
+       setCategoriaArchivo('');
+       const dDocs = await api.get(`/arrendamientos/locations/${id}/documentos`);
+       setDocumentos(unwrap(dDocs, 'documentos') || []);
++      setSharepointConfigurado(dDocs?.sharepointConfigurado !== false);
+     } catch (err) {
+       setErrorArchivo(err.message || 'No se pudo subir el archivo.');
+     } finally {
+@@ -156,7 +152,7 @@ export default function LocationDetalle() {
+   }
+ 
+   async function borrarArchivo(docId) {
+-    if (!window.confirm('¿Eliminar este documento?')) return;
++    if (!window.confirm('¿Eliminar este documento de SharePoint?')) return;
+     try {
+       await api.del(`/arrendamientos/documentos/${docId}`);
+       setDocumentos((prev) => prev.filter((d) => d.id !== docId));
+@@ -165,6 +161,12 @@ export default function LocationDetalle() {
+     }
+   }
+ 
++  function formatTamano(bytes) {
++    if (!bytes && bytes !== 0) return '—';
++    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
++    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
++  }
++
+   async function enviarComentario(e) {
+     e.preventDefault();
+     if (!comentario.trim()) return;
+@@ -267,8 +269,17 @@ export default function LocationDetalle() {
+       </div>
+ 
+       <div className="card">
+-        <div className="card-title">Archivos</div>
++        <div className="card-title">Archivos (SharePoint)</div>
++        <p className="muted" style={{ marginTop: -6, fontSize: 13 }}>
++          Esta lista viene directo de la carpeta de la ubicación en SharePoint (Ubicaciones/{location.nombre}) — subir o
++          eliminar aquí sube/elimina el archivo ahí mismo.
++        </p>
+         {errorArchivo && <div className="alert alert-error">{errorArchivo}</div>}
++        {sharepointConfigurado === false && (
++          <div className="alert alert-error">
++            SharePoint no está configurado en el backend (faltan las variables MS_GRAPH_*/SHAREPOINT_*).
++          </div>
++        )}
+         <form onSubmit={subirArchivo} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
+           <input type="file" onChange={(e) => setArchivo(e.target.files?.[0] || null)} />
+           <select
+@@ -276,15 +287,15 @@ export default function LocationDetalle() {
+             onChange={(e) => setCategoriaArchivo(e.target.value)}
+             style={{ maxWidth: 220 }}
+           >
+-            <option value="">Selecciona categoría…</option>
+-            {CATEGORIAS_DOCUMENTO_LOCATION.map((cat) => (
++            <option value="">Sin etiqueta (Contrato Master)</option>
++            {CATEGORIAS_DOCUMENTO_LOCATION.filter((c) => c !== 'Contrato Master').map((cat) => (
+               <option key={cat} value={cat}>{cat}</option>
+             ))}
+           </select>
+           <button type="submit" className="btn btn-primary btn-sm" disabled={subiendo}>{subiendo ? 'Subiendo…' : 'Subir archivo'}</button>
+         </form>
+         {documentos.length === 0 ? (
+-          <div className="empty-state">Sin archivos subidos.</div>
++          <div className="empty-state">Sin archivos en SharePoint todavía.</div>
+         ) : (
+           <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+             {documentosAgrupados.map(([categoria, items]) => (
+@@ -295,15 +306,15 @@ export default function LocationDetalle() {
+                 </div>
+                 <div className="table-wrap">
+                   <table>
+-                    <thead><tr><th>Archivo</th><th>Subido por</th><th>Fecha</th><th></th></tr></thead>
++                    <thead><tr><th>Archivo</th><th>Tamaño</th><th>Modificado</th><th></th></tr></thead>
+                     <tbody>
+                       {items.map((d) => (
+                         <tr key={d.id}>
+-                          <td><a href={resolverUrl(d.url)} target="_blank" rel="noreferrer">{d.nombreArchivo}</a></td>
+-                          <td>{d.subidoPorNombre || '—'}</td>
+-                          <td>{formatFechaHora(d.createdAt)}</td>
++                          <td><a href={d.url} target="_blank" rel="noreferrer">{d.nombre}</a></td>
++                          <td>{formatTamano(d.tamanoBytes)}</td>
++                          <td>{formatFechaHora(d.modificado)}</td>
+                           <td>
+-                            {(esAdmin || d.subidoPorId === usuario?.id) && (
++                            {esAdmin && (
+                               <button className="icon-btn" onClick={() => borrarArchivo(d.id)}>Eliminar</button>
+                             )}
+                           </td>
+-- 
+2.43.0
+

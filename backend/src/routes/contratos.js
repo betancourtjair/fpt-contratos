@@ -494,7 +494,7 @@ router.get(
 // (solo aplica si el tipo de contrato está marcado es_franquicia)
 // ---------------------------------------------------------------------------
 const CAMPOS_FRANQUICIA = [
-  'clubId', 'cuotaInicial', 'regaliasPorcentaje', 'fondoMercadeoPorcentaje', 'periodicidadPagoRegalias',
+  'clubId', 'clubAbierto', 'fechaApertura', 'cuotaInicial', 'regaliasPorcentaje', 'fondoMercadeoPorcentaje', 'periodicidadPagoRegalias',
   'fechaProximoPagoRegalias', 'diasAvisoPagoRegalias', 'territorio', 'radioExclusividadKm',
   'direccionPunto', 'fechaLimiteApertura', 'diasAvisoApertura', 'numeroRenovacionesPermitidas',
   'condicionesRenovacion', 'diasAvisoRenovacion', 'fechaProximaAuditoria', 'diasAvisoAuditoria',
@@ -503,6 +503,12 @@ const CAMPOS_FRANQUICIA = [
 
 const MAPA_COLUMNAS_FRANQUICIA = {
   clubId: 'club_id',
+  // ¿El club ya abrió sus puertas? Ver CASE_CATEGORIA_APERTURA en routes/franquicias.js --
+  // determina si el dashboard lo clasifica como "activa/abierta" en vez de inferirlo (mal)
+  // de fecha_proximo_pago_regalias.
+  clubAbierto: 'club_abierto',
+  // Fecha real (o, mientras se confirma, tentativa) en que el club abrió. Solo informativa.
+  fechaApertura: 'fecha_apertura',
   cuotaInicial: 'cuota_inicial',
   regaliasPorcentaje: 'regalias_porcentaje',
   fondoMercadeoPorcentaje: 'fondo_mercadeo_porcentaje',

@@ -47,6 +47,8 @@ function contratoAValores(c, fd) {
     diasAvisoVencimiento: c.diasAvisoVencimiento ?? '',
     // Datos de franquicia (si el contrato no es de franquicia, fd viene vacío y se usan defaults).
     clubId: fd.clubId || '',
+    clubAbierto: !!fd.clubAbierto,
+    fechaApertura: fecha10(fd.fechaApertura),
     cuotaInicial: fd.cuotaInicial ?? '',
     regaliasPorcentaje: fd.regaliasPorcentaje ?? '',
     fondoMercadeoPorcentaje: fd.fondoMercadeoPorcentaje ?? '',
@@ -561,6 +563,13 @@ export default function DetalleContrato() {
                   <div>
                     <dt>Club</dt>
                     <dd>{franquicia.clubNombre || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt>¿Ya abrió?</dt>
+                    <dd>
+                      {franquicia.clubAbierto ? 'Sí' : 'No'}
+                      {franquicia.clubAbierto && franquicia.fechaApertura && ` (${formatFecha(franquicia.fechaApertura)})`}
+                    </dd>
                   </div>
                   <div>
                     <dt>Cuota inicial</dt>
