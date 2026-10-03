@@ -15,19 +15,31 @@ const { registrarAuditoria } = require('./audit');
 const { enviarCorreo } = require('../email');
 const { obtenerCorreosJuridicoAdmin, formatFecha } = require('./notificaciones');
 const { sincronizarEstatusEnDocumentos } = require('./documentosMetadatos');
+const { obtenerCorreosConfigurados } = require('./franquicias');
 
 async function revisarVencimientos() {
   const resumen = { marcadosVencido: [], marcadosPorVencer: [] };
 
   await withTransaction(async (client) => {
     const correosLegalAdmin = await obtenerCorreosJuridicoAdmin(client);
+    // Destinatarios adicionales configurados a mano en el panel de administración de
+    // Franquicias (ver franquicia_alerta_destinatarios) -- solo aplica cuando el contrato que
+    // vence/está por vencer es de franquicia; el resto de contratos sigue usando únicamente
+    // correosLegalAdmin, igual que antes.
+    const correosFranquiciaVencimiento = await obtenerCorreosConfigurados(client, 'vencimiento');
 
     // 1) Vencidos: fecha_fin ya pasó y siguen como activo/por_vencer.
     const { rows: vencidos } = await client.query(
-      `UPDATE contratos
+      `UPDATE contratos c
        SET estatus = 'vencido', updated_at = now()
-       WHERE estatus IN ('activo', 'por_vencer') AND fecha_fin IS NOT NULL AND fecha_fin < CURRENT_DATE
-       RETURNING *`
+       FROM (
+         SELECT c2.id, fd.contrato_id IS NOT NULL AS es_franquicia
+         FROM contratos c2
+         LEFT JOIN contrato_franquicia_detalles fd ON fd.contrato_id = c2.id
+         WHERE c2.estatus IN ('activo', 'por_vencer') AND c2.fecha_fin IS NOT NULL AND c2.fecha_fin < CURRENT_DATE
+       ) elegibles
+       WHERE c.id = elegibles.id
+       RETURNING c.*, elegibles.es_franquicia`
     );
     for (const contrato of vencidos) {
       await registrarAuditoria({
@@ -70,12 +82,14 @@ async function revisarVencimientos() {
     }
 
     resumen._correosLegalAdmin = correosLegalAdmin;
+    resumen._correosFranquiciaVencimiento = correosFranquiciaVencimiento;
     resumen._contratosVencidos = vencidos;
     resumen._contratosPorVencer = porVencer;
   });
 
   // Notificaciones fuera de la transacción.
   const correosLegalAdmin = resumen._correosLegalAdmin || [];
+  const correosFranquiciaVencimiento = resumen._correosFranquiciaVencimiento || [];
   const todos = [
     ...resumen._contratosVencidos.map((c) => ({ contrato: c, tipo: 'vencido' })),
     ...resumen._contratosPorVencer.map((c) => ({ contrato: c, tipo: 'por_vencer' })),
@@ -88,11 +102,15 @@ async function revisarVencimientos() {
     try {
       const { rows } = await query('SELECT email FROM usuarios WHERE id = $1', [contrato.solicitado_por_id]);
       const solicitanteEmail = rows[0]?.email;
-      const destinatarios = [solicitanteEmail, ...correosLegalAdmin].filter(Boolean);
+      const esFranquicia = contrato.es_franquicia;
+      const destinatarios = [
+        ...new Set(
+          [solicitanteEmail, ...correosLegalAdmin, ...(esFranquicia ? correosFranquiciaVencimiento : [])].filter(Boolean)
+        ),
+      ];
       if (destinatarios.length === 0) continue;
 
       const fechaFinTexto = formatFecha(contrato.fecha_fin);
-      const esFranquicia = tipo === 'por_vencer' && contrato.es_franquicia;
 
       const asunto =
         tipo === 'vencido'

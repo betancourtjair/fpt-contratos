@@ -111,6 +111,8 @@ export default function Layout() {
             <NavItem to="/franquicias" end>Dashboard</NavItem>
             <NavItem to="/franquicias/nueva">Nueva solicitud</NavItem>
             <NavItem to="/franquicias/clubes">Clubes</NavItem>
+            <NavItem to="/franquicias/alertas">Alertas</NavItem>
+            <NavItem to="/franquicias/alertas/destinatarios">Destinatarios de alertas</NavItem>
           </SidebarSection>
         )}
 

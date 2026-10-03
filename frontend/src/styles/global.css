@@ -290,6 +290,39 @@ button { font-family: var(--font-body); }
   letter-spacing: 0.03em;
 }
 
+/* Variante de stat-card que además es un botón (filtro clicable del dashboard de
+   Franquicias): mismo look, pero con cursor/hover/estado-activo de control interactivo. */
+button.stat-card-clickable {
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+button.stat-card-clickable:hover {
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-md, var(--shadow-sm));
+}
+button.stat-card-clickable.stat-card-active {
+  border-color: var(--color-primary);
+  border-width: 2px;
+}
+.stat-card-ok .stat-value { color: var(--color-success, #2f9e52); }
+.stat-card-alerta .stat-value { color: var(--color-danger, #c0392b); }
+.stat-card-pendiente .stat-value { color: var(--color-warning, #b7791f); }
+
+/* Botón con apariencia de enlace, para acciones inline dentro de tablas/listas (p.ej. saltar
+   de un aviso directo al filtro de ese club, sin salir de la página). */
+.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--color-primary);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+}
+.link-button:hover { opacity: 0.8; }
+
 .grid-2 {
   display: grid;
   grid-template-columns: 1.3fr 1fr;

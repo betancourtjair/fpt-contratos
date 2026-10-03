@@ -14,6 +14,8 @@ import Usuarios from './pages/admin/Usuarios.jsx';
 import DashboardFranquicias from './pages/franquicias/DashboardFranquicias.jsx';
 import NuevaSolicitudFranquicia from './pages/franquicias/NuevaSolicitudFranquicia.jsx';
 import Clubes from './pages/franquicias/Clubes.jsx';
+import AlertasFranquicias from './pages/franquicias/AlertasFranquicias.jsx';
+import AdminDestinatariosFranquicia from './pages/franquicias/AdminDestinatariosFranquicia.jsx';
 import CambiarPassword from './pages/CambiarPassword.jsx';
 import DashboardArrendamientos from './pages/arrendamientos/DashboardArrendamientos.jsx';
 import Locations from './pages/arrendamientos/Locations.jsx';
@@ -30,6 +32,12 @@ import CompaniesArrendamientos from './pages/arrendamientos/Companies.jsx';
 // El módulo de Franquicias es exclusivo de super_admin/admin/ceo/cfo/cabeza_juridico/juridico
 // (separado del resto de Contratos/Dashboard, que sí ven otros roles).
 const ROLES_FRANQUICIAS = ['super_admin', 'admin', 'ceo', 'cfo', 'cabeza_juridico', 'juridico'];
+
+// El panel de administración de destinatarios de alertas (y, por consistencia, la página de
+// alertas) usan el mismo set de roles que el backend hace cumplir de verdad en
+// ROLES_MODULO_FRANQUICIAS (utils/roles.js) -- deliberadamente SIN "admin" genérico, a
+// diferencia de ROLES_FRANQUICIAS arriba (ver nota de inconsistencia conocida en ese array).
+const ROLES_MODULO_FRANQUICIAS = ['super_admin', 'juridico', 'cabeza_juridico', 'ceo', 'cfo'];
 
 // El apartado "Rentas" (dentro de Arrendamientos) expone el calendario de renta de todo el
 // portafolio, así que se restringe a Super Admin/CEO/CFO/Jurídico — a diferencia del resto del
@@ -85,6 +93,22 @@ export default function App() {
           element={
             <ProtectedRoute roles={ROLES_FRANQUICIAS}>
               <Clubes />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="franquicias/alertas"
+          element={
+            <ProtectedRoute roles={ROLES_MODULO_FRANQUICIAS}>
+              <AlertasFranquicias />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="franquicias/alertas/destinatarios"
+          element={
+            <ProtectedRoute roles={ROLES_MODULO_FRANQUICIAS}>
+              <AdminDestinatariosFranquicia />
             </ProtectedRoute>
           }
         />

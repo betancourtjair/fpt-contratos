@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api, unwrap } from '../../api.js';
 import Spinner from '../../components/Spinner.jsx';
 import EstatusBadge, { estatusLabel } from '../../components/EstatusBadge.jsx';
@@ -21,7 +21,18 @@ const TIPO_EVENTO_LABEL = {
   auditoria: 'Auditoría',
 };
 
+// Categorías de "¿el club ya abrió?" (ver CASE_CATEGORIA_APERTURA en el backend): más útiles
+// en el día a día que el estatus genérico del contrato, ya que todo lo que se sube nace
+// "activo" y ya firmado (se firma a mano, se escanea y se sube).
+const CATEGORIA_APERTURA_INFO = {
+  abierta: { label: 'Activas / abiertas', desc: 'Ya operando (hay fecha de próximo pago de regalías).', tono: 'ok' },
+  por_abrir: { label: 'Por abrir', desc: 'Firmado, todavía no abre; su fecha límite no ha pasado.', tono: 'pendiente' },
+  falta_abrir: { label: 'Falta de abrir', desc: 'Su fecha límite de apertura ya pasó y no ha abierto.', tono: 'alerta' },
+};
+
 export default function DashboardFranquicias() {
+  const [searchParams, setSearchParams] = useSearchParams();
+
   const [resumen, setResumen] = useState(null);
   const [cargandoResumen, setCargandoResumen] = useState(true);
   const [errorResumen, setErrorResumen] = useState('');
@@ -35,6 +46,7 @@ export default function DashboardFranquicias() {
   const [clubId, setClubId] = useState('');
   const [q, setQ] = useState('');
   const [qInput, setQInput] = useState('');
+  const categoriaApertura = searchParams.get('categoriaApertura') || '';
 
   useEffect(() => {
     let activo = true;
@@ -66,7 +78,7 @@ export default function DashboardFranquicias() {
       setCargandoLista(true);
       setErrorLista('');
       try {
-        const data = await api.get('/franquicias', { estatus, clubId, texto: q });
+        const data = await api.get('/franquicias', { estatus, clubId, texto: q, categoriaApertura });
         if (activo) setContratos(unwrap(data, 'contratos') || []);
       } catch (err) {
         if (activo) setErrorLista(err.message || 'No se pudieron cargar los contratos de franquicia.');
@@ -76,14 +88,31 @@ export default function DashboardFranquicias() {
     }
     cargarLista();
     return () => { activo = false; };
-  }, [estatus, clubId, q]);
+  }, [estatus, clubId, q, categoriaApertura]);
 
   function handleSearchSubmit(e) {
     e.preventDefault();
     setQ(qInput.trim());
   }
 
+  function filtrarPorCategoriaApertura(categoria) {
+    const next = new URLSearchParams(searchParams);
+    if (categoria && categoria !== categoriaApertura) next.set('categoriaApertura', categoria);
+    else next.delete('categoriaApertura');
+    setSearchParams(next);
+    document.getElementById('lista-contratos-franquicia')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function irAClub(id) {
+    const next = new URLSearchParams(searchParams);
+    next.delete('categoriaApertura');
+    setSearchParams(next);
+    setClubId(id);
+    document.getElementById('lista-contratos-franquicia')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
   const porEstatus = resumen?.conteosPorEstatus || {};
+  const porCategoriaApertura = resumen?.conteosPorCategoriaApertura || { abierta: 0, por_abrir: 0, falta_abrir: 0 };
   const porVencer = resumen?.contratosPorVencer || [];
   const eventosProximos = resumen?.eventosProximos || [];
   const clubesSinContrato = resumen?.clubesSinContrato || [];
@@ -107,12 +136,34 @@ export default function DashboardFranquicias() {
         <Spinner label="Cargando resumen…" />
       ) : (
         <>
+          <div className="card-title" style={{ marginTop: 0 }}>¿Los clubes ya abrieron?</div>
+          <div className="stat-grid">
+            {Object.entries(CATEGORIA_APERTURA_INFO).map(([key, info]) => (
+              <button
+                type="button"
+                key={key}
+                className={`stat-card stat-card-clickable stat-card-${info.tono}${categoriaApertura === key ? ' stat-card-active' : ''}`}
+                onClick={() => filtrarPorCategoriaApertura(key)}
+                title={info.desc}
+              >
+                <div className="stat-value">{porCategoriaApertura[key] ?? 0}</div>
+                <div className="stat-label">{info.label}</div>
+              </button>
+            ))}
+          </div>
+
+          <div className="card-title">Contratos por estatus</div>
           <div className="stat-grid">
             {estatusKeys.map((estatusKey) => (
-              <div className="stat-card" key={estatusKey}>
+              <button
+                type="button"
+                key={estatusKey}
+                className={`stat-card stat-card-clickable${estatus === estatusKey ? ' stat-card-active' : ''}`}
+                onClick={() => setEstatus(estatus === estatusKey ? '' : estatusKey)}
+              >
                 <div className="stat-value">{porEstatus[estatusKey] ?? 0}</div>
                 <div className="stat-label">{estatusLabel(estatusKey)}</div>
-              </div>
+              </button>
             ))}
           </div>
 
@@ -139,7 +190,10 @@ export default function DashboardFranquicias() {
             </div>
 
             <div className="card">
-              <div className="card-title">Por vencer próximamente</div>
+              <div className="card-title">
+                Por vencer próximamente
+                <Link to="/franquicias/alertas" className="btn btn-ghost btn-sm" style={{ marginLeft: 8 }}>Ver todo</Link>
+              </div>
               {porVencer.length === 0 ? (
                 <div className="empty-state">Sin contratos próximos a vencer.</div>
               ) : (
@@ -170,7 +224,10 @@ export default function DashboardFranquicias() {
           </div>
 
           <div className="card">
-            <div className="card-title">Avisos próximos (regalías, apertura, auditoría)</div>
+            <div className="card-title">
+              Avisos próximos (regalías, apertura, auditoría)
+              <Link to="/franquicias/alertas" className="btn btn-ghost btn-sm" style={{ marginLeft: 8 }}>Ver todo</Link>
+            </div>
             {eventosProximos.length === 0 ? (
               <div className="empty-state">Sin avisos próximos.</div>
             ) : (
@@ -189,7 +246,13 @@ export default function DashboardFranquicias() {
                     {eventosProximos.map((ev, idx) => (
                       <tr key={`${ev.contratoId}-${ev.tipo}-${idx}`}>
                         <td>{ev.folio}</td>
-                        <td>{ev.clubNombre || '—'}</td>
+                        <td>
+                          {ev.clubId ? (
+                            <button type="button" className="link-button" onClick={() => irAClub(ev.clubId)}>
+                              {ev.clubNombre || '—'}
+                            </button>
+                          ) : (ev.clubNombre || '—')}
+                        </td>
                         <td>{TIPO_EVENTO_LABEL[ev.tipo] || ev.tipo}</td>
                         <td>{formatFecha(ev.fecha)}</td>
                         <td><Link className="btn btn-secondary btn-sm" to={`/contratos/${ev.contratoId}`}>Ver</Link></td>
@@ -203,8 +266,15 @@ export default function DashboardFranquicias() {
         </>
       )}
 
-      <div className="card">
-        <div className="card-title">Todos los contratos de franquicia</div>
+      <div className="card" id="lista-contratos-franquicia">
+        <div className="card-title">
+          Todos los contratos de franquicia
+          {categoriaApertura && (
+            <span className="tag-pill" style={{ marginLeft: 8 }}>
+              {CATEGORIA_APERTURA_INFO[categoriaApertura]?.label || categoriaApertura}
+            </span>
+          )}
+        </div>
 
         <form className="filters-bar" onSubmit={handleSearchSubmit}>
           <input
@@ -227,11 +297,16 @@ export default function DashboardFranquicias() {
             ))}
           </select>
           <button type="submit" className="btn btn-secondary">Buscar</button>
-          {(estatus || clubId || q) && (
+          {(estatus || clubId || q || categoriaApertura) && (
             <button
               type="button"
               className="btn btn-ghost"
-              onClick={() => { setEstatus(''); setClubId(''); setQ(''); setQInput(''); }}
+              onClick={() => {
+                setEstatus(''); setClubId(''); setQ(''); setQInput('');
+                const next = new URLSearchParams(searchParams);
+                next.delete('categoriaApertura');
+                setSearchParams(next);
+              }}
             >
               Limpiar filtros
             </button>
@@ -253,12 +328,13 @@ export default function DashboardFranquicias() {
                   <th>Monto</th>
                   <th>Vencimiento</th>
                   <th>Estatus</th>
+                  <th>¿Abrió?</th>
                 </tr>
               </thead>
               <tbody>
                 {contratos.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="table-empty">No se encontraron contratos de franquicia con estos filtros.</td>
+                    <td colSpan={7} className="table-empty">No se encontraron contratos de franquicia con estos filtros.</td>
                   </tr>
                 ) : (
                   contratos.map((c) => (
@@ -269,6 +345,7 @@ export default function DashboardFranquicias() {
                       <td>{formatMonto(c.monto, c.moneda)}</td>
                       <td>{formatFecha(c.fechaFin)}</td>
                       <td><EstatusBadge estatus={c.estatus} /></td>
+                      <td>{CATEGORIA_APERTURA_INFO[c.categoriaApertura]?.label || '—'}</td>
                     </tr>
                   ))
                 )}

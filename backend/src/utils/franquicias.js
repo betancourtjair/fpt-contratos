@@ -19,6 +19,21 @@ const { obtenerCorreosJuridicoAdmin, formatFecha } = require('./notificaciones')
 
 const MESES_POR_PERIODICIDAD = { mensual: 1, trimestral: 3, semestral: 6, anual: 12 };
 
+/**
+ * Correos configurados a mano en el panel de administración de Franquicias (tabla
+ * franquicia_alerta_destinatarios) para un tipo de evento dado, más los que se configuraron
+ * como "todos" (reciben cualquier aviso). Se suman a los correos fijos por rol de
+ * obtenerCorreosJuridicoAdmin() -- no los reemplazan.
+ */
+async function obtenerCorreosConfigurados(client, tipoEvento) {
+  const { rows } = await client.query(
+    `SELECT email FROM franquicia_alerta_destinatarios
+     WHERE activo = true AND tipo_evento IN ($1, 'todos')`,
+    [tipoEvento]
+  );
+  return rows.map((r) => r.email).filter(Boolean);
+}
+
 /** Avanza `fecha` en saltos de `periodicidad` hasta que quede en el futuro (>= hoy). */
 function avanzarAlSiguientePeriodo(fecha, periodicidad) {
   const meses = MESES_POR_PERIODICIDAD[periodicidad] || 1;
@@ -44,9 +59,15 @@ async function enviarAviso({ destinatarios, asunto, cuerpo }) {
 async function revisarFranquicias() {
   const resumen = { avisosPagoRegalias: [], avisosApertura: [], avisosAuditoria: [], pagosAvanzados: [] };
   let correosLegalAdmin = [];
+  let correosConfigurados = { pago_regalias: [], apertura: [], auditoria: [] };
 
   await withTransaction(async (client) => {
     correosLegalAdmin = await obtenerCorreosJuridicoAdmin(client);
+    correosConfigurados = {
+      pago_regalias: await obtenerCorreosConfigurados(client, 'pago_regalias'),
+      apertura: await obtenerCorreosConfigurados(client, 'apertura'),
+      auditoria: await obtenerCorreosConfigurados(client, 'auditoria'),
+    };
 
     // 1a) Pagos de regalías próximos a avisar.
     const { rows: pagosPorAvisar } = await client.query(
@@ -137,15 +158,17 @@ async function revisarFranquicias() {
     }
   });
 
-  // Correos, fuera de la transacción (igual que en vencimientos.js).
-  async function destinatariosDe(fd) {
+  // Correos, fuera de la transacción (igual que en vencimientos.js). Se suman tres fuentes:
+  // el solicitante del contrato, los correos fijos por rol (jurídico/admin/super_admin) y los
+  // que se hayan configurado a mano para este tipo de evento en el panel de administración.
+  async function destinatariosDe(fd, tipoEvento) {
     const { rows } = await query('SELECT email FROM usuarios WHERE id = $1', [fd.solicitado_por_id]);
-    return [rows[0]?.email, ...correosLegalAdmin].filter(Boolean);
+    return [...new Set([rows[0]?.email, ...correosLegalAdmin, ...(correosConfigurados[tipoEvento] || [])].filter(Boolean))];
   }
 
   for (const fd of resumen.avisosPagoRegalias) {
     await enviarAviso({
-      destinatarios: await destinatariosDe(fd),
+      destinatarios: await destinatariosDe(fd, 'pago_regalias'),
       asunto: `Contrato de franquicia ${fd.folio}: próximo pago de regalías`,
       cuerpo: `<p>El contrato de franquicia <b>${fd.folio} - ${fd.titulo}</b> tiene un pago de regalías${
         fd.fondo_mercadeo_porcentaje ? '/fondo de mercadeo' : ''
@@ -154,14 +177,14 @@ async function revisarFranquicias() {
   }
   for (const fd of resumen.avisosApertura) {
     await enviarAviso({
-      destinatarios: await destinatariosDe(fd),
+      destinatarios: await destinatariosDe(fd, 'apertura'),
       asunto: `Contrato de franquicia ${fd.folio}: se acerca la fecha límite de apertura`,
       cuerpo: `<p>El contrato de franquicia <b>${fd.folio} - ${fd.titulo}</b> tiene como fecha límite de apertura del punto el ${formatFecha(fd.fecha_limite_apertura)}.</p>`,
     });
   }
   for (const fd of resumen.avisosAuditoria) {
     await enviarAviso({
-      destinatarios: await destinatariosDe(fd),
+      destinatarios: await destinatariosDe(fd, 'auditoria'),
       asunto: `Contrato de franquicia ${fd.folio}: próxima auditoría de cumplimiento`,
       cuerpo: `<p>El contrato de franquicia <b>${fd.folio} - ${fd.titulo}</b> tiene programada una auditoría/inspección de cumplimiento para el ${formatFecha(fd.fecha_proxima_auditoria)}.</p>`,
     });
@@ -175,4 +198,4 @@ async function revisarFranquicias() {
   };
 }
 
-module.exports = { revisarFranquicias, avanzarAlSiguientePeriodo };
+module.exports = { revisarFranquicias, avanzarAlSiguientePeriodo, obtenerCorreosConfigurados };
