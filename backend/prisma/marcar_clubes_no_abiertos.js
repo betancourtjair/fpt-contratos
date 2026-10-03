@@ -72,17 +72,34 @@ async function main() {
     }
 
     // 3) Resto del historico: fecha de apertura TENTATIVA = fecha limite de apertura - 7 dias,
-    //    solo para los que siguen marcados como abiertos y aun no tienen fecha capturada.
+    //    solo para los que siguen marcados como abiertos, aun no tienen fecha capturada, Y cuya
+    //    fecha limite ya paso (si la fecha limite esta en el futuro, el club genuinamente aun
+    //    no abre -- no se le debe poner una fecha de apertura "tentativa" que ademas esta en el
+    //    futuro; ver corregir_fechas_futuras.js para la correccion de este caso).
     const { rows: tentativos } = await client.query(
       `UPDATE contrato_franquicia_detalles fd
        SET fecha_apertura = fd.fecha_limite_apertura - INTERVAL '7 days', updated_at = now()
        WHERE fd.club_abierto = true
          AND fd.fecha_apertura IS NULL
          AND fd.fecha_limite_apertura IS NOT NULL
+         AND fd.fecha_limite_apertura <= CURRENT_DATE
        RETURNING fd.contrato_id`
     );
     console.log(`Fecha de apertura tentativa (limite - 7 dias) asignada a ${tentativos.length} contratos del historico.`);
     console.log('Esas fechas son tentativas: hay que confirmarlas club por club con la fecha real.');
+
+    // 4) Los que tienen fecha limite en el futuro y quedaron sin tocar en el paso 3: aun no
+    //    abren de verdad, se dejan explicitamente en false (en vez del default true).
+    const { rows: futuros } = await client.query(
+      `UPDATE contrato_franquicia_detalles fd
+       SET club_abierto = false, updated_at = now()
+       WHERE fd.club_abierto = true
+         AND fd.fecha_apertura IS NULL
+         AND fd.fecha_limite_apertura IS NOT NULL
+         AND fd.fecha_limite_apertura > CURRENT_DATE
+       RETURNING fd.contrato_id`
+    );
+    console.log(`Marcados como aun no abiertos por tener fecha limite futura: ${futuros.length}.`);
   } catch (err) {
     console.error('Error al corregir aperturas de franquicia:', err.message);
     process.exitCode = 1;

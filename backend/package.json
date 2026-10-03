@@ -14,7 +14,9 @@
     "migrate:franquicia-club-abierto": "node prisma/migrate_franquicia_club_abierto.js",
     "fix:franquicias-club-abierto": "node prisma/marcar_clubes_no_abiertos.js",
     "fix:franquicias-en-construccion": "node prisma/marcar_clubes_en_construccion.js",
-    "listar:franquicias": "node prisma/listar_franquicias.js"
+    "listar:franquicias": "node prisma/listar_franquicias.js",
+    "fix:franquicias-fechas-futuras": "node prisma/corregir_fechas_futuras.js",
+    "fix:franquicias-aperturas-confirmadas": "node prisma/marcar_aperturas_confirmadas.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
