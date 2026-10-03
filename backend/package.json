@@ -12,7 +12,9 @@
     "migrate:franquicia-alertas": "node prisma/migrate_franquicia_alertas.js",
     "fix:franquicias-firmado": "node prisma/marcar_franquicias_firmadas.js",
     "migrate:franquicia-club-abierto": "node prisma/migrate_franquicia_club_abierto.js",
-    "fix:franquicias-club-abierto": "node prisma/marcar_clubes_no_abiertos.js"
+    "fix:franquicias-club-abierto": "node prisma/marcar_clubes_no_abiertos.js",
+    "fix:franquicias-en-construccion": "node prisma/marcar_clubes_en_construccion.js",
+    "listar:franquicias": "node prisma/listar_franquicias.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
