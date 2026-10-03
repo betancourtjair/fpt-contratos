@@ -420,6 +420,10 @@ export default function DetalleContrato() {
               Cancelar contrato
             </button>
           )}
+          {/* Si se entró desde un listado con filtros (p.ej. el dashboard de Franquicias con una
+              categoría o club filtrados, o la página de Alertas), "Volver" respeta de dónde
+              se vino en vez de mandar siempre al listado genérico por estatus. */}
+          <button className="btn btn-secondary" onClick={() => navigate(-1)}>← Volver</button>
           <button className="btn btn-secondary" onClick={() => navigate(rutaListaParaEstatus(contrato.estatus))}>Volver al listado</button>
         </div>
       </div>

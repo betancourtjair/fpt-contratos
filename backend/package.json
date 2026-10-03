@@ -9,7 +9,8 @@
     "dev": "node --watch src/server.js",
     "seed": "node prisma/seed.js",
     "migrate:arrendamientos": "node prisma/migrate_arrendamientos.js",
-    "migrate:franquicia-alertas": "node prisma/migrate_franquicia_alertas.js"
+    "migrate:franquicia-alertas": "node prisma/migrate_franquicia_alertas.js",
+    "fix:franquicias-firmado": "node prisma/marcar_franquicias_firmadas.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
