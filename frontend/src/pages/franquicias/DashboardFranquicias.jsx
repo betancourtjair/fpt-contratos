@@ -112,7 +112,15 @@ export default function DashboardFranquicias() {
   }
 
   const porEstatus = resumen?.conteosPorEstatus || {};
-  const porCategoriaApertura = resumen?.conteosPorCategoriaApertura || { abierta: 0, por_abrir: 0, falta_abrir: 0 };
+  // api.js convierte las llaves del backend a camelCase (por_abrir -> porAbrir), pero las
+  // categorias de CATEGORIA_APERTURA_INFO usan el valor original (tambien es el filtro que
+  // espera el backend), asi que se leen con ambas formas.
+  const conteosApertura = resumen?.conteosPorCategoriaApertura || {};
+  const porCategoriaApertura = {
+    abierta: conteosApertura.abierta ?? 0,
+    por_abrir: conteosApertura.por_abrir ?? conteosApertura.porAbrir ?? 0,
+    falta_abrir: conteosApertura.falta_abrir ?? conteosApertura.faltaAbrir ?? 0,
+  };
   const porVencer = resumen?.contratosPorVencer || [];
   const eventosProximos = resumen?.eventosProximos || [];
   const clubesSinContrato = resumen?.clubesSinContrato || [];
