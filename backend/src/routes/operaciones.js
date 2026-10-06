@@ -92,6 +92,15 @@ function esGestor(usuario) {
 }
 
 // Solo Cabeza de Juridico (y super_admin) asigna quien de Juridico toma el caso.
+// Quien captura (rol 'operaciones') solo ve el estatus: no se le expone quien de Juridico tiene
+// asignado el caso, quien lo atendio ni quien subio cada documento.
+const CAMPOS_INTERNOS_SOLICITUD = ['asignado_a_id', 'asignado_a_nombre', 'asignado_en', 'atendido_por_id', 'atendido_por_nombre'];
+function ocultarInternos(obj, campos) {
+  const copia = { ...obj };
+  for (const c of campos) delete copia[c];
+  return copia;
+}
+
 function puedeAsignar(usuario) {
   return ['super_admin', 'cabeza_juridico'].includes(usuario.rol);
 }
@@ -184,7 +193,9 @@ router.get(
        ORDER BY s.created_at DESC`,
       valores
     );
-    res.json({ solicitudes: rows });
+    res.json({
+      solicitudes: esGestor(req.usuario) ? rows : rows.map((r) => ocultarInternos(r, CAMPOS_INTERNOS_SOLICITUD)),
+    });
   })
 );
 
@@ -215,9 +226,13 @@ router.get(
        WHERE d.solicitud_id = $1 ORDER BY d.created_at ASC`,
       [solicitud.id]
     );
+    const gestor = esGestor(req.usuario);
     res.json({
-      solicitud,
-      documentos: docs.map((d) => ({ ...d, url: storageContratos.getUrl(d.ruta_archivo) })),
+      solicitud: gestor ? solicitud : ocultarInternos(solicitud, CAMPOS_INTERNOS_SOLICITUD),
+      documentos: docs.map((d) => {
+        const doc = { ...d, url: storageContratos.getUrl(d.ruta_archivo) };
+        return gestor ? doc : ocultarInternos(doc, ['subido_por_id', 'subido_por_nombre']);
+      }),
     });
   })
 );

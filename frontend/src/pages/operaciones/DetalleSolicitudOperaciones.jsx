@@ -203,6 +203,7 @@ export default function DetalleSolicitudOperaciones() {
         </div>
       )}
 
+      {gestionaOperaciones && (
       <div className="card">
         <div className="card-title">Asignación</div>
         {puedeAsignar ? (
@@ -222,6 +223,7 @@ export default function DetalleSolicitudOperaciones() {
           <p style={{ margin: 0 }}>{solicitud.asignadoANombre ? <>Asignada a <strong>{solicitud.asignadoANombre}</strong>.</> : 'Todavía no se asigna a una persona de Jurídico.'}</p>
         )}
       </div>
+      )}
 
       <div className="card">
         <div className="card-title">Documentos de Jurídico{docsJuridico.length > 0 && <span className="tag-pill">{docsJuridico.length}</span>}</div>
@@ -232,7 +234,7 @@ export default function DetalleSolicitudOperaciones() {
             {docsJuridico.map((d) => (
               <li key={d.id}>
                 <a href={resolverUrl(d.url)} target="_blank" rel="noreferrer">{d.nombreArchivo}</a>
-                {d.subidoPorNombre && <span className="page-header-sub"> · {d.subidoPorNombre}</span>}
+                {gestionaOperaciones && d.subidoPorNombre && <span className="page-header-sub"> · {d.subidoPorNombre}</span>}
               </li>
             ))}
           </ul>
@@ -284,7 +286,7 @@ export default function DetalleSolicitudOperaciones() {
             <p style={{ whiteSpace: 'pre-wrap' }}>{solicitud.respuestaJuridico || 'Todavía no hay respuesta de Jurídico.'}</p>
           </>
         )}
-        {solicitud.atendidoPorNombre && (
+        {gestionaOperaciones && solicitud.atendidoPorNombre && (
           <p className="page-header-sub" style={{ marginBottom: 0 }}>Atendida por {solicitud.atendidoPorNombre}.</p>
         )}
       </div>
