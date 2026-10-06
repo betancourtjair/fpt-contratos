@@ -10,7 +10,7 @@ const { ROLES_NIVEL_ADMIN } = require('../utils/roles');
 
 const router = express.Router();
 
-const ROLES_VALIDOS = ['super_admin', 'admin', 'juridico', 'cabeza_juridico', 'aprobador', 'solicitante', 'ceo', 'cfo', 'lectura'];
+const ROLES_VALIDOS = ['super_admin', 'admin', 'juridico', 'cabeza_juridico', 'aprobador', 'solicitante', 'ceo', 'cfo', 'operaciones', 'lectura'];
 // Igual que en usuarios.js: CEO/CFO/Cabeza de Jurídico son un "puesto" y, como super_admin, solo
 // un super_admin puede asignarlos (los pasos de flujo ya identifican a la persona fija por id,
 // no por rol).

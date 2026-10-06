@@ -18,7 +18,8 @@
     "fix:franquicias-fechas-futuras": "node prisma/corregir_fechas_futuras.js",
     "fix:franquicias-aperturas-confirmadas": "node prisma/marcar_aperturas_confirmadas.js",
     "fix:franquicias-fechas-directorio": "node prisma/marcar_fechas_reales_directorio.js",
-    "crear:franquicias-faltantes": "node prisma/crear_contratos_faltantes.js"
+    "crear:franquicias-faltantes": "node prisma/crear_contratos_faltantes.js",
+    "migrate:operaciones": "node prisma/migrate_operaciones.js"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

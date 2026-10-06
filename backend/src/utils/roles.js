@@ -26,4 +26,19 @@ const ROLES_RENTAS = ['super_admin', 'ceo', 'cfo', 'cabeza_juridico', 'juridico'
 // la app) — a diferencia de ROLES_RENTAS, aquí NO se incluye "admin".
 const ROLES_MODULO_FRANQUICIAS = ['super_admin', 'juridico', 'cabeza_juridico', 'ceo', 'cfo'];
 
-module.exports = { ROLES_NIVEL_ADMIN, ROLES_AUTORIDAD_JURIDICA, ROLES_RENTAS, ROLES_MODULO_FRANQUICIAS };
+// Modulo "Operaciones" (solicitudes de Operaciones hacia Juridico): quien PUEDE entrar es el rol
+// 'operaciones' (captura solicitudes y ve solo las suyas) y, del lado de Juridico, los que dan
+// seguimiento a todas (ROLES_GESTION_OPERACIONES: cambian estatus y ven todo). El rol
+// 'operaciones' no tiene acceso a nada mas de la plataforma (ver restringirRolOperaciones en
+// middleware/auth.js).
+const ROLES_GESTION_OPERACIONES = ['super_admin', 'cabeza_juridico', 'juridico'];
+const ROLES_MODULO_OPERACIONES = ['operaciones', ...ROLES_GESTION_OPERACIONES];
+
+module.exports = {
+  ROLES_NIVEL_ADMIN,
+  ROLES_AUTORIDAD_JURIDICA,
+  ROLES_RENTAS,
+  ROLES_MODULO_FRANQUICIAS,
+  ROLES_GESTION_OPERACIONES,
+  ROLES_MODULO_OPERACIONES,
+};

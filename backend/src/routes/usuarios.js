@@ -8,7 +8,7 @@ const { enviarCorreo } = require('../email');
 const { ROLES_NIVEL_ADMIN } = require('../utils/roles');
 
 const router = express.Router();
-const ROLES_VALIDOS = ['super_admin', 'admin', 'juridico', 'cabeza_juridico', 'aprobador', 'solicitante', 'ceo', 'cfo', 'lectura'];
+const ROLES_VALIDOS = ['super_admin', 'admin', 'juridico', 'cabeza_juridico', 'aprobador', 'solicitante', 'ceo', 'cfo', 'operaciones', 'lectura'];
 // CEO, CFO y Cabeza de Jurídico son, sobre todo, un "puesto" informativo (los pasos de flujo ya
 // los referencian como personas fijas vía aprobador_id, no por rol); pero como cualquier otro rol
 // elevado, solo un super_admin puede asignarlos — igual que super_admin.

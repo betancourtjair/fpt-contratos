@@ -16,6 +16,10 @@ import NuevaSolicitudFranquicia from './pages/franquicias/NuevaSolicitudFranquic
 import Clubes from './pages/franquicias/Clubes.jsx';
 import AlertasFranquicias from './pages/franquicias/AlertasFranquicias.jsx';
 import AdminDestinatariosFranquicia from './pages/franquicias/AdminDestinatariosFranquicia.jsx';
+import Operaciones from './pages/operaciones/Operaciones.jsx';
+import NuevaSolicitudOperaciones from './pages/operaciones/NuevaSolicitudOperaciones.jsx';
+import ListaSolicitudesOperaciones from './pages/operaciones/ListaSolicitudesOperaciones.jsx';
+import DetalleSolicitudOperaciones from './pages/operaciones/DetalleSolicitudOperaciones.jsx';
 import CambiarPassword from './pages/CambiarPassword.jsx';
 import DashboardArrendamientos from './pages/arrendamientos/DashboardArrendamientos.jsx';
 import Locations from './pages/arrendamientos/Locations.jsx';
@@ -43,6 +47,10 @@ const ROLES_MODULO_FRANQUICIAS = ['super_admin', 'juridico', 'cabeza_juridico', 
 // portafolio, así que se restringe a Super Admin/CEO/CFO/Jurídico — a diferencia del resto del
 // módulo de Arrendamientos, que es de lectura abierta a cualquier rol autenticado.
 const ROLES_RENTAS = ['super_admin', 'ceo', 'cfo', 'cabeza_juridico', 'juridico'];
+
+// Modulo Operaciones: el rol 'operaciones' (captura) y Juridico/Cabeza de Juridico/super_admin
+// (seguimiento). Mismo set que ROLES_MODULO_OPERACIONES en backend/src/utils/roles.js.
+const ROLES_OPERACIONES = ['operaciones', 'super_admin', 'cabeza_juridico', 'juridico'];
 
 export default function App() {
   return (
@@ -109,6 +117,39 @@ export default function App() {
           element={
             <ProtectedRoute roles={ROLES_MODULO_FRANQUICIAS}>
               <AdminDestinatariosFranquicia />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="operaciones"
+          element={
+            <ProtectedRoute roles={ROLES_OPERACIONES}>
+              <Operaciones />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="operaciones/solicitudes"
+          element={
+            <ProtectedRoute roles={ROLES_OPERACIONES}>
+              <ListaSolicitudesOperaciones />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="operaciones/solicitudes/:id"
+          element={
+            <ProtectedRoute roles={ROLES_OPERACIONES}>
+              <DetalleSolicitudOperaciones />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="operaciones/:categoria/:ruta"
+          element={
+            <ProtectedRoute roles={ROLES_OPERACIONES}>
+              <NuevaSolicitudOperaciones />
             </ProtectedRoute>
           }
         />

@@ -18,6 +18,8 @@ const dashboardRoutes = require('./routes/dashboard');
 const jobsRoutes = require('./routes/jobs');
 const clubesRoutes = require('./routes/clubes');
 const franquiciasRoutes = require('./routes/franquicias');
+const operacionesRoutes = require('./routes/operaciones');
+const { restringirRolOperaciones } = require('./middleware/auth');
 const documensoWebhookRoutes = require('./routes/documensoWebhook');
 const keepAliveRoutes = require('./routes/keepAlive');
 const { iniciarProgramador } = require('./jobs/scheduler');
@@ -53,6 +55,9 @@ app.get('/health', (req, res) => {
   res.json({ ok: true, servicio: 'fpt-contratos-backend', timestamp: new Date().toISOString() });
 });
 
+// El rol 'operaciones' solo puede usar /api/auth y /api/operaciones (ver middleware/auth.js).
+app.use('/api', restringirRolOperaciones);
+
 app.use('/api/auth', authRoutes);
 app.use('/api/usuarios', usuariosRoutes);
 app.use('/api/tipos-contrato', tiposContratoRoutes);
@@ -63,6 +68,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/jobs', jobsRoutes);
 app.use('/api/clubes', clubesRoutes);
 app.use('/api/franquicias', franquiciasRoutes);
+app.use('/api/operaciones', operacionesRoutes);
 // Público (sin requireAuth): lo llama la instancia de Documenso, no un usuario de la app. Ver
 // src/routes/documensoWebhook.js para el modelo de seguridad (secreto compartido opcional).
 app.use('/api/webhooks/documenso', documensoWebhookRoutes);

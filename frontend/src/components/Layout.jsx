@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { Navigate, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useState } from 'react';
 import { useAuth } from '../auth/AuthContext.jsx';
 import fptLogoMark from '../assets/fpt-logo-mark.png';
@@ -12,6 +12,7 @@ const ROL_LABELS = {
   juridico: 'Jurídico',
   aprobador: 'Aprobador',
   solicitante: 'Solicitante',
+  operaciones: 'Operaciones',
   lectura: 'Lectura',
 };
 
@@ -26,7 +27,7 @@ function cargarSeccionesAbiertas() {
   } catch {
     // localStorage no disponible (modo privado, etc.); usamos el valor por defecto.
   }
-  return { contratos: true, franquicias: true, arrendamientos: true, administracion: true };
+  return { contratos: true, franquicias: true, arrendamientos: true, administracion: true, operaciones: true, opSocios: true, opAutoridades: true };
 }
 
 function NavItem({ to, children, end }) {
@@ -58,9 +59,35 @@ function SidebarSection({ id, titulo, abierta, onToggle, children }) {
   );
 }
 
+// Submenu de segundo nivel dentro de la seccion Operaciones ("Atencion a Socios" / "Atencion a
+// Autoridades"): se expande al hacer clic y muestra sus formularios.
+function SidebarSubgroup({ id, titulo, abierto, onToggle, children }) {
+  return (
+    <div className="sidebar-subgroup">
+      <button
+        type="button"
+        className="sidebar-link sidebar-subgroup-toggle"
+        onClick={() => onToggle(id)}
+        aria-expanded={abierto}
+      >
+        <span>{titulo}</span>
+        <span className={`sidebar-chevron${abierto ? '' : ' collapsed'}`} aria-hidden="true">▾</span>
+      </button>
+      {abierto && <div className="sidebar-subgroup-items">{children}</div>}
+    </div>
+  );
+}
+
 export default function Layout() {
-  const { usuario, logout, esAdmin, puedeFranquicias, puedeVerRentas } = useAuth();
+  const { usuario, logout, esAdmin, puedeFranquicias, puedeVerRentas, esOperaciones, puedeOperaciones } = useAuth();
   const [secciones, setSecciones] = useState(cargarSeccionesAbiertas);
+  const location = useLocation();
+
+  // El rol 'operaciones' solo puede estar en el modulo Operaciones (el backend tambien lo hace
+  // cumplir): cualquier otra ruta lo regresa ahi.
+  if (esOperaciones && !location.pathname.startsWith('/operaciones') && location.pathname !== '/cambiar-password') {
+    return <Navigate to="/operaciones" replace />;
+  }
 
   function toggleSeccion(id) {
     setSecciones((prev) => {
@@ -87,62 +114,87 @@ export default function Layout() {
           </div>
         </div>
 
-        <SidebarSection
-          id="contratos"
-          titulo="Contratos"
-          abierta={secciones.contratos !== false}
-          onToggle={toggleSeccion}
-        >
-          <NavItem to="/" end>Dashboard</NavItem>
-          <NavItem to="/solicitudes">Solicitudes</NavItem>
-          <NavItem to="/contratos-vigentes">Contratos vigentes</NavItem>
-          <NavItem to="/archivo">Archivo</NavItem>
-          <NavItem to="/busqueda">Búsqueda avanzada</NavItem>
-          <NavItem to="/contratos/nueva">Nueva solicitud</NavItem>
-        </SidebarSection>
+        {!esOperaciones && (
+          <>
+            <SidebarSection
+              id="contratos"
+              titulo="Contratos"
+              abierta={secciones.contratos !== false}
+              onToggle={toggleSeccion}
+            >
+              <NavItem to="/" end>Dashboard</NavItem>
+              <NavItem to="/solicitudes">Solicitudes</NavItem>
+              <NavItem to="/contratos-vigentes">Contratos vigentes</NavItem>
+              <NavItem to="/archivo">Archivo</NavItem>
+              <NavItem to="/busqueda">Búsqueda avanzada</NavItem>
+              <NavItem to="/contratos/nueva">Nueva solicitud</NavItem>
+            </SidebarSection>
 
-        {puedeFranquicias && (
-          <SidebarSection
-            id="franquicias"
-            titulo="Franquicias"
-            abierta={secciones.franquicias !== false}
-            onToggle={toggleSeccion}
-          >
-            <NavItem to="/franquicias" end>Dashboard</NavItem>
-            <NavItem to="/franquicias/nueva">Nueva solicitud</NavItem>
-            <NavItem to="/franquicias/clubes">Clubes</NavItem>
-            <NavItem to="/franquicias/alertas">Alertas</NavItem>
-            <NavItem to="/franquicias/alertas/destinatarios">Destinatarios de alertas</NavItem>
-          </SidebarSection>
+            {puedeFranquicias && (
+              <SidebarSection
+                id="franquicias"
+                titulo="Franquicias"
+                abierta={secciones.franquicias !== false}
+                onToggle={toggleSeccion}
+              >
+                <NavItem to="/franquicias" end>Dashboard</NavItem>
+                <NavItem to="/franquicias/nueva">Nueva solicitud</NavItem>
+                <NavItem to="/franquicias/clubes">Clubes</NavItem>
+                <NavItem to="/franquicias/alertas">Alertas</NavItem>
+                <NavItem to="/franquicias/alertas/destinatarios">Destinatarios de alertas</NavItem>
+              </SidebarSection>
+            )}
+
+            <SidebarSection
+              id="arrendamientos"
+              titulo="Arrendamientos"
+              abierta={secciones.arrendamientos !== false}
+              onToggle={toggleSeccion}
+            >
+              <NavItem to="/arrendamientos" end>Dashboard</NavItem>
+              <NavItem to="/arrendamientos/ubicaciones">Ubicaciones</NavItem>
+              <NavItem to="/arrendamientos/leases">Leases</NavItem>
+              {puedeVerRentas && <NavItem to="/arrendamientos/rentas">Rentas</NavItem>}
+              <NavItem to="/arrendamientos/eventos">Eventos</NavItem>
+              <NavItem to="/arrendamientos/tareas">Tareas</NavItem>
+              <NavItem to="/arrendamientos/contactos">Contactos</NavItem>
+              <NavItem to="/arrendamientos/brands">Brands</NavItem>
+              <NavItem to="/arrendamientos/companies">Companies</NavItem>
+            </SidebarSection>
+
+            {esAdmin && (
+              <SidebarSection
+                id="administracion"
+                titulo="Administración"
+                abierta={secciones.administracion !== false}
+                onToggle={toggleSeccion}
+              >
+                <NavItem to="/admin/tipos-contrato">Tipos de contrato</NavItem>
+                <NavItem to="/admin/flujos">Flujos de autorización</NavItem>
+                <NavItem to="/admin/usuarios">Usuarios</NavItem>
+              </SidebarSection>
+            )}
+
+          </>
         )}
 
-        <SidebarSection
-          id="arrendamientos"
-          titulo="Arrendamientos"
-          abierta={secciones.arrendamientos !== false}
-          onToggle={toggleSeccion}
-        >
-          <NavItem to="/arrendamientos" end>Dashboard</NavItem>
-          <NavItem to="/arrendamientos/ubicaciones">Ubicaciones</NavItem>
-          <NavItem to="/arrendamientos/leases">Leases</NavItem>
-          {puedeVerRentas && <NavItem to="/arrendamientos/rentas">Rentas</NavItem>}
-          <NavItem to="/arrendamientos/eventos">Eventos</NavItem>
-          <NavItem to="/arrendamientos/tareas">Tareas</NavItem>
-          <NavItem to="/arrendamientos/contactos">Contactos</NavItem>
-          <NavItem to="/arrendamientos/brands">Brands</NavItem>
-          <NavItem to="/arrendamientos/companies">Companies</NavItem>
-        </SidebarSection>
-
-        {esAdmin && (
+        {puedeOperaciones && (
           <SidebarSection
-            id="administracion"
-            titulo="Administración"
-            abierta={secciones.administracion !== false}
+            id="operaciones"
+            titulo="Operaciones"
+            abierta={secciones.operaciones !== false}
             onToggle={toggleSeccion}
           >
-            <NavItem to="/admin/tipos-contrato">Tipos de contrato</NavItem>
-            <NavItem to="/admin/flujos">Flujos de autorización</NavItem>
-            <NavItem to="/admin/usuarios">Usuarios</NavItem>
+            <NavItem to="/operaciones" end>Inicio</NavItem>
+            <SidebarSubgroup id="opSocios" titulo="Atención a Socios" abierto={secciones.opSocios !== false} onToggle={toggleSeccion}>
+              <NavItem to="/operaciones/socios/baja-socio">Baja de socio</NavItem>
+              <NavItem to="/operaciones/socios/baja-invitado">Baja de invitado</NavItem>
+            </SidebarSubgroup>
+            <SidebarSubgroup id="opAutoridades" titulo="Atención a Autoridades" abierto={secciones.opAutoridades !== false} onToggle={toggleSeccion}>
+              <NavItem to="/operaciones/autoridades/citatorio-profeco">Citatorios PROFECO</NavItem>
+              <NavItem to="/operaciones/autoridades/solicitud-fiscalia">Fiscalías y MP</NavItem>
+            </SidebarSubgroup>
+            <NavItem to="/operaciones/solicitudes">{esOperaciones ? 'Mis solicitudes' : 'Solicitudes'}</NavItem>
           </SidebarSection>
         )}
 

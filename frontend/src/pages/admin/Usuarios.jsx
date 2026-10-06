@@ -12,6 +12,7 @@ const ROLES = [
   { value: 'juridico', label: 'Jurídico' },
   { value: 'aprobador', label: 'Aprobador' },
   { value: 'solicitante', label: 'Solicitante' },
+  { value: 'operaciones', label: 'Operaciones' },
   { value: 'lectura', label: 'Lectura' },
 ];
 

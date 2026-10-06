@@ -71,9 +71,21 @@ export function AuthProvider({ children }) {
   // deliberadamente sin "admin" genérico, a diferencia de esAdmin/puedeFranquicias.
   const puedeVerRentas = usuario && ['super_admin', 'ceo', 'cfo', 'cabeza_juridico', 'juridico'].includes(usuario.rol);
 
+  // Modulo Operaciones: el rol 'operaciones' solo puede usar este modulo (nada mas de la
+  // plataforma) y ve unicamente sus propias solicitudes; Jurídico/Cabeza de Jurídico/super_admin
+  // entran tambien, ven todas y les dan seguimiento (ver ROLES_MODULO_OPERACIONES y
+  // ROLES_GESTION_OPERACIONES en backend/src/utils/roles.js).
+  const esOperaciones = !!usuario && usuario.rol === 'operaciones';
+  const gestionaOperaciones = !!usuario && ['super_admin', 'cabeza_juridico', 'juridico'].includes(usuario.rol);
+  const puedeOperaciones = esOperaciones || gestionaOperaciones;
+
   const value = useMemo(
-    () => ({ usuario, cargando, login, logout, esAdmin, puedeFranquicias, puedeVerRentas, actualizarUsuario }),
-    [usuario, cargando, login, logout, esAdmin, puedeFranquicias, puedeVerRentas, actualizarUsuario]
+    () => ({
+      usuario, cargando, login, logout, esAdmin, puedeFranquicias, puedeVerRentas, actualizarUsuario,
+      esOperaciones, gestionaOperaciones, puedeOperaciones,
+    }),
+    [usuario, cargando, login, logout, esAdmin, puedeFranquicias, puedeVerRentas, actualizarUsuario,
+      esOperaciones, gestionaOperaciones, puedeOperaciones]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
