@@ -38,6 +38,25 @@ function NavItem({ to, children, end }) {
   );
 }
 
+// Iconos (trazo tipo "feather") de cada seccion del menu lateral.
+const ICONOS_SECCION = {
+  contratos: <><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M9 13h6M9 17h6" /></>,
+  franquicias: <><path d="M3 9l1.5-5h15L21 9" /><path d="M4 9v11h16V9" /><path d="M3 9a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0" /><path d="M10 20v-6h4v6" /></>,
+  arrendamientos: <><path d="M4 21V5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v16" /><path d="M14 10h5a1 1 0 0 1 1 1v10" /><path d="M2 21h20" /><path d="M8 8h2M8 12h2M8 16h2" /></>,
+  operaciones: <><path d="M9 4h6a1 1 0 0 1 1 1v2H8V5a1 1 0 0 1 1-1z" /><path d="M16 6h2a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h2" /><path d="M9 13l2 2 4-4" /></>,
+  administracion: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></>,
+};
+
+function IconoSeccion({ id }) {
+  const trazos = ICONOS_SECCION[id];
+  if (!trazos) return null;
+  return (
+    <svg className="sidebar-section-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {trazos}
+    </svg>
+  );
+}
+
 // Sección colapsable del menú lateral: el label actúa como botón que expande/contrae el
 // bloque de enlaces, con una flechita que indica el estado actual.
 function SidebarSection({ id, titulo, abierta, onToggle, children }) {
@@ -45,11 +64,11 @@ function SidebarSection({ id, titulo, abierta, onToggle, children }) {
     <div className="sidebar-section">
       <button
         type="button"
-        className="sidebar-section-label sidebar-section-toggle"
+        className={`sidebar-section-label sidebar-section-toggle${abierta ? ' open' : ''}`}
         onClick={() => onToggle(id)}
         aria-expanded={abierta}
       >
-        <span>{titulo}</span>
+        <span className="sidebar-section-title"><IconoSeccion id={id} />{titulo}</span>
         <span className={`sidebar-chevron${abierta ? '' : ' collapsed'}`} aria-hidden="true">▾</span>
       </button>
       <div className={`sidebar-collapsible${abierta ? '' : ' collapsed'}`}>
