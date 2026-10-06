@@ -52,6 +52,12 @@ button { font-family: var(--font-body); }
   display: flex;
   flex-direction: column;
   padding: 20px 0;
+  /* Menu fijo: no se mueve al hacer scroll en la pagina; si es muy largo, scrollea por dentro. */
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  align-self: flex-start;
 }
 
 .sidebar-brand {

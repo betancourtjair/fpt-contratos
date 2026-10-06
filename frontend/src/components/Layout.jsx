@@ -114,6 +114,26 @@ export default function Layout() {
           </div>
         </div>
 
+        {esOperaciones && (
+          <SidebarSection
+            id="operaciones"
+            titulo="Operaciones"
+            abierta={secciones.operaciones !== false}
+            onToggle={toggleSeccion}
+          >
+            <NavItem to="/operaciones" end>Inicio</NavItem>
+            <SidebarSubgroup id="opSocios" titulo="Atención a Socios" abierto={secciones.opSocios !== false} onToggle={toggleSeccion}>
+              <NavItem to="/operaciones/socios/baja-socio">Baja de socio</NavItem>
+              <NavItem to="/operaciones/socios/baja-invitado">Baja de invitado</NavItem>
+            </SidebarSubgroup>
+            <SidebarSubgroup id="opAutoridades" titulo="Atención a Autoridades" abierto={secciones.opAutoridades !== false} onToggle={toggleSeccion}>
+              <NavItem to="/operaciones/autoridades/citatorio-profeco">Citatorios PROFECO</NavItem>
+              <NavItem to="/operaciones/autoridades/solicitud-fiscalia">Fiscalías y MP</NavItem>
+            </SidebarSubgroup>
+            <NavItem to="/operaciones/solicitudes">{esOperaciones ? 'Mis solicitudes' : 'Solicitudes'}</NavItem>
+          </SidebarSection>
+        )}
+
         {!esOperaciones && (
           <>
             <SidebarSection
@@ -162,6 +182,26 @@ export default function Layout() {
               <NavItem to="/arrendamientos/companies">Companies</NavItem>
             </SidebarSection>
 
+            {puedeOperaciones && (
+              <SidebarSection
+                id="operaciones"
+                titulo="Operaciones"
+                abierta={secciones.operaciones !== false}
+                onToggle={toggleSeccion}
+              >
+                <NavItem to="/operaciones" end>Inicio</NavItem>
+                <SidebarSubgroup id="opSocios" titulo="Atención a Socios" abierto={secciones.opSocios !== false} onToggle={toggleSeccion}>
+                  <NavItem to="/operaciones/socios/baja-socio">Baja de socio</NavItem>
+                  <NavItem to="/operaciones/socios/baja-invitado">Baja de invitado</NavItem>
+                </SidebarSubgroup>
+                <SidebarSubgroup id="opAutoridades" titulo="Atención a Autoridades" abierto={secciones.opAutoridades !== false} onToggle={toggleSeccion}>
+                  <NavItem to="/operaciones/autoridades/citatorio-profeco">Citatorios PROFECO</NavItem>
+                  <NavItem to="/operaciones/autoridades/solicitud-fiscalia">Fiscalías y MP</NavItem>
+                </SidebarSubgroup>
+                <NavItem to="/operaciones/solicitudes">{esOperaciones ? 'Mis solicitudes' : 'Solicitudes'}</NavItem>
+              </SidebarSection>
+            )}
+
             {esAdmin && (
               <SidebarSection
                 id="administracion"
@@ -176,26 +216,6 @@ export default function Layout() {
             )}
 
           </>
-        )}
-
-        {puedeOperaciones && (
-          <SidebarSection
-            id="operaciones"
-            titulo="Operaciones"
-            abierta={secciones.operaciones !== false}
-            onToggle={toggleSeccion}
-          >
-            <NavItem to="/operaciones" end>Inicio</NavItem>
-            <SidebarSubgroup id="opSocios" titulo="Atención a Socios" abierto={secciones.opSocios !== false} onToggle={toggleSeccion}>
-              <NavItem to="/operaciones/socios/baja-socio">Baja de socio</NavItem>
-              <NavItem to="/operaciones/socios/baja-invitado">Baja de invitado</NavItem>
-            </SidebarSubgroup>
-            <SidebarSubgroup id="opAutoridades" titulo="Atención a Autoridades" abierto={secciones.opAutoridades !== false} onToggle={toggleSeccion}>
-              <NavItem to="/operaciones/autoridades/citatorio-profeco">Citatorios PROFECO</NavItem>
-              <NavItem to="/operaciones/autoridades/solicitud-fiscalia">Fiscalías y MP</NavItem>
-            </SidebarSubgroup>
-            <NavItem to="/operaciones/solicitudes">{esOperaciones ? 'Mis solicitudes' : 'Solicitudes'}</NavItem>
-          </SidebarSection>
         )}
 
         <div className="sidebar-footer">
