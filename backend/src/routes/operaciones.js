@@ -73,11 +73,28 @@ const TIPOS = {
 
 const VALIDACIONES_BAJAS = ['autorizacionGerenteRegional', 'informacionCompleta', 'evidenciasAdjuntas'];
 
-const COLUMNAS_LISTA = `s.id, s.folio, s.categoria, s.tipo, s.estatus, s.created_at, s.updated_at,
+const COLUMNAS_LISTA = `s.id, s.folio, s.categoria, s.tipo, s.estatus, s.created_at, s.updated_at, s.asignado_a_id,
+  (SELECT nombre FROM usuarios WHERE id = s.asignado_a_id) AS asignado_a_nombre,
   s.gerente_nombre, s.club_id, cl.nombre AS club_nombre, s.solicitante_id, u.nombre AS solicitante_nombre`;
 
 function esGestor(usuario) {
   return ROLES_GESTION_OPERACIONES.includes(usuario.rol);
+}
+
+// Solo Cabeza de Juridico (y super_admin) asigna quien de Juridico toma el caso.
+function puedeAsignar(usuario) {
+  return ['super_admin', 'cabeza_juridico'].includes(usuario.rol);
+}
+
+// Cabeza/super_admin trabajan cualquier caso; una persona de Juridico solo los que le asignaron.
+function puedeTrabajar(usuario, solicitud) {
+  return puedeAsignar(usuario) || solicitud.asignado_a_id === usuario.id;
+}
+
+const MAX_BYTES_ADJUNTOS_CORREO = 3 * 1024 * 1024; // Graph sendMail acepta ~4 MB por peticion
+
+function urlApp() {
+  return (process.env.FRONTEND_URL || 'https://contratos.fpt.com.mx').replace(/\/+$/, '');
 }
 
 async function generarFolioOperaciones(client, anio = new Date().getFullYear()) {
@@ -167,11 +184,12 @@ router.get(
   asyncHandler(async (req, res) => {
     const { rows } = await query(
       `SELECT s.*, cl.nombre AS club_nombre, u.nombre AS solicitante_nombre, u.email AS solicitante_email,
-              ua.nombre AS atendido_por_nombre
+              ua.nombre AS atendido_por_nombre, uas.nombre AS asignado_a_nombre
        FROM operaciones_solicitudes s
        JOIN clubes cl ON cl.id = s.club_id
        JOIN usuarios u ON u.id = s.solicitante_id
        LEFT JOIN usuarios ua ON ua.id = s.atendido_por_id
+       LEFT JOIN usuarios uas ON uas.id = s.asignado_a_id
        WHERE s.id = $1`,
       [req.params.id]
     );
@@ -181,7 +199,10 @@ router.get(
       throw forbidden('Solo puedes ver las solicitudes que tu capturaste.');
     }
     const { rows: docs } = await query(
-      'SELECT * FROM operaciones_documentos WHERE solicitud_id = $1 ORDER BY created_at ASC',
+      `SELECT d.*, us.nombre AS subido_por_nombre
+       FROM operaciones_documentos d
+       LEFT JOIN usuarios us ON us.id = d.subido_por_id
+       WHERE d.solicitud_id = $1 ORDER BY d.created_at ASC`,
       [solicitud.id]
     );
     res.json({
@@ -313,21 +334,70 @@ router.post(
   })
 );
 
-// PATCH /api/operaciones/solicitudes/:id - Juridico/admin: cambia estatus y deja respuesta.
+// GET /api/operaciones/juridicos - personas de Juridico a las que se puede asignar un caso.
+router.get(
+  '/juridicos',
+  requireRole('super_admin', 'cabeza_juridico'),
+  asyncHandler(async (req, res) => {
+    const { rows } = await query(
+      `SELECT id, nombre, email, rol FROM usuarios
+       WHERE activo = true AND rol IN ('juridico', 'cabeza_juridico')
+       ORDER BY nombre ASC`
+    );
+    res.json({ usuarios: rows });
+  })
+);
+
+// PATCH /api/operaciones/solicitudes/:id
+//   asignadoAId (solo Cabeza de Juridico / super_admin; null quita la asignacion)
+//   estatus, respuestaJuridico (Cabeza/super_admin, o la persona de Juridico asignada)
 router.patch(
   '/solicitudes/:id',
   requireRole(...ROLES_GESTION_OPERACIONES),
   asyncHandler(async (req, res) => {
-    const { estatus, respuestaJuridico } = req.body || {};
+    const { estatus, respuestaJuridico, asignadoAId } = req.body || {};
     if (estatus !== undefined && !ESTATUS.includes(estatus)) {
       throw badRequest(`estatus invalido. Valores permitidos: ${ESTATUS.join(', ')}.`);
     }
-    if (estatus === undefined && respuestaJuridico === undefined) {
-      throw badRequest('Envia estatus y/o respuestaJuridico.');
+    if (estatus === undefined && respuestaJuridico === undefined && asignadoAId === undefined) {
+      throw badRequest('Envia estatus, respuestaJuridico y/o asignadoAId.');
     }
+
+    const { rows: actuales } = await query('SELECT * FROM operaciones_solicitudes WHERE id = $1', [req.params.id]);
+    const actual = actuales[0];
+    if (!actual) throw notFound('Solicitud no encontrada.');
+
     const sets = ['updated_at = now()'];
     const valores = [];
     let i = 1;
+    let nuevoAsignado = null;
+
+    if (asignadoAId !== undefined) {
+      if (!puedeAsignar(req.usuario)) {
+        throw forbidden('Solo Cabeza de Juridico puede asignar el caso.');
+      }
+      if (asignadoAId === null || asignadoAId === '') {
+        sets.push('asignado_a_id = NULL', 'asignado_en = NULL');
+      } else {
+        const { rows } = await query(
+          `SELECT id, nombre, email FROM usuarios
+           WHERE id = $1 AND activo = true AND rol IN ('juridico', 'cabeza_juridico')`,
+          [asignadoAId]
+        );
+        if (!rows[0]) throw badRequest('El usuario asignado debe ser una persona activa de Juridico.');
+        nuevoAsignado = rows[0];
+        sets.push(`asignado_a_id = $${i++}`, 'asignado_en = now()');
+        valores.push(nuevoAsignado.id);
+        // Al tomar el caso deja de estar "recibida".
+        if (actual.estatus === 'recibida' && estatus === undefined) sets.push("estatus = 'en_proceso'");
+      }
+    }
+
+    if (estatus !== undefined || respuestaJuridico !== undefined) {
+      if (!puedeTrabajar(req.usuario, actual)) {
+        throw forbidden('Este caso esta asignado a otra persona de Juridico. Pide a Cabeza de Juridico que te lo asigne.');
+      }
+    }
     if (estatus !== undefined) {
       sets.push(`estatus = $${i++}`);
       valores.push(estatus);
@@ -345,8 +415,116 @@ router.patch(
       `UPDATE operaciones_solicitudes SET ${sets.join(', ')} WHERE id = $${i} RETURNING *`,
       valores
     );
-    if (!rows[0]) throw notFound('Solicitud no encontrada.');
-    res.json({ solicitud: rows[0] });
+
+    // Aviso a quien toma el caso (si no se lo asigno a si mismo). Un fallo de correo no tumba el cambio.
+    if (nuevoAsignado && nuevoAsignado.email && nuevoAsignado.id !== req.usuario.id) {
+      try {
+        await enviarCorreo(
+          nuevoAsignado.email,
+          `[Operaciones] Se te asigno la solicitud ${actual.folio}`,
+          `<p>${escaparHtml(req.usuario.nombre)} te asigno una solicitud de Operaciones.</p>
+           <p><strong>Folio:</strong> ${escaparHtml(actual.folio)}<br>
+              <strong>Tipo:</strong> ${escaparHtml(TIPOS[actual.tipo]?.label || actual.tipo)}</p>
+           <p><a href="${urlApp()}/#/operaciones/solicitudes/${actual.id}">Abrir la solicitud en la plataforma</a></p>`
+        );
+      } catch (err) {
+        console.error('[operaciones] No se pudo avisar al asignado:', err.message);
+      }
+    }
+
+    res.json({ solicitud: { ...rows[0], asignado_a_nombre: nuevoAsignado?.nombre } });
+  })
+);
+
+// POST /api/operaciones/solicitudes/:id/documentos (multipart: archivos 1..8, notificar, mensaje)
+// Juridico adjunta archivos de respuesta (campo 'respuesta'). Con notificar=true se manda correo a
+// quien capturo la solicitud con los archivos adjuntos (para imprimirlos); si pesan mas de ~3 MB
+// el correo lleva solo la liga a la plataforma.
+router.post(
+  '/solicitudes/:id/documentos',
+  requireRole(...ROLES_GESTION_OPERACIONES),
+  upload.array('archivos', 8),
+  asyncHandler(async (req, res) => {
+    const archivos = req.files || [];
+    if (archivos.length === 0) throw badRequest('Adjunta al menos un archivo.');
+    const { rows } = await query(
+      `SELECT s.*, cl.nombre AS club_nombre, u.nombre AS solicitante_nombre, u.email AS solicitante_email
+       FROM operaciones_solicitudes s
+       JOIN clubes cl ON cl.id = s.club_id
+       JOIN usuarios u ON u.id = s.solicitante_id
+       WHERE s.id = $1`,
+      [req.params.id]
+    );
+    const solicitud = rows[0];
+    if (!solicitud) throw notFound('Solicitud no encontrada.');
+    if (!puedeTrabajar(req.usuario, solicitud)) {
+      throw forbidden('Este caso esta asignado a otra persona de Juridico.');
+    }
+    const def = TIPOS[solicitud.tipo];
+
+    for (const archivo of archivos) {
+      const ruta = await storageContratos.save({
+        buffer: archivo.buffer,
+        originalname: archivo.originalname,
+        contratoId: solicitud.id,
+        carpetaBase: 'operaciones',
+        tipoContratoNombre: `Operaciones - ${solicitud.categoria === 'socios' ? 'Atencion a Socios' : 'Atencion a Autoridades'}`,
+        folio: solicitud.folio,
+        tituloContrato: def?.label || solicitud.tipo,
+        contraparteNombre: solicitud.club_nombre,
+        estatusLabel: 'Respuesta de Juridico',
+      });
+      await query(
+        `INSERT INTO operaciones_documentos (solicitud_id, campo, nombre_archivo, ruta_archivo, subido_por_id)
+         VALUES ($1,'respuesta',$2,$3,$4)`,
+        [solicitud.id, archivo.originalname, ruta, req.usuario.id]
+      );
+    }
+    await query('UPDATE operaciones_solicitudes SET updated_at = now() WHERE id = $1', [solicitud.id]);
+
+    const notificar = ['true', '1', 'on', true].includes(req.body?.notificar);
+    let notificado = false;
+    let adjuntadoEnCorreo = false;
+    if (notificar && solicitud.solicitante_email) {
+      try {
+        const total = archivos.reduce((n, a) => n + a.size, 0);
+        adjuntadoEnCorreo = total <= MAX_BYTES_ADJUNTOS_CORREO;
+        const mensaje = String(req.body?.mensaje || '').trim();
+        const nombres = archivos.map((a) => `<li>${escaparHtml(a.originalname)}</li>`).join('');
+        const r = await enviarCorreo(
+          solicitud.solicitante_email,
+          `[Operaciones] Juridico adjunto documentos a tu solicitud ${solicitud.folio}`,
+          `<p>${escaparHtml(req.usuario.nombre)} (Juridico) adjunto documentos a tu solicitud.</p>
+           <p><strong>Folio:</strong> ${escaparHtml(solicitud.folio)}<br>
+              <strong>Tipo:</strong> ${escaparHtml(def?.label || solicitud.tipo)}<br>
+              <strong>Club:</strong> ${escaparHtml(solicitud.club_nombre)}</p>
+           ${mensaje ? `<p><strong>Mensaje de Juridico:</strong><br>${escaparHtml(mensaje).replace(/\n/g, '<br>')}</p>` : ''}
+           <p><strong>Documentos:</strong></p><ul>${nombres}</ul>
+           <p>${adjuntadoEnCorreo
+             ? 'Los documentos van adjuntos a este correo para que puedas imprimirlos.'
+             : 'Por su tamano no se adjuntaron al correo: descargalos desde la plataforma.'}</p>
+           <p><a href="${urlApp()}/#/operaciones/solicitudes/${solicitud.id}">Ver la solicitud en la plataforma</a></p>`,
+          adjuntadoEnCorreo
+            ? archivos.map((a) => ({ nombre: a.originalname, contentType: a.mimetype, buffer: a.buffer }))
+            : []
+        );
+        notificado = r?.enviado === true || r?.modo === 'dev';
+      } catch (err) {
+        console.error('[operaciones] No se pudo notificar al solicitante:', err.message);
+      }
+    }
+
+    const { rows: docs } = await query(
+      `SELECT d.*, us.nombre AS subido_por_nombre FROM operaciones_documentos d
+       LEFT JOIN usuarios us ON us.id = d.subido_por_id
+       WHERE d.solicitud_id = $1 ORDER BY d.created_at ASC`,
+      [solicitud.id]
+    );
+    res.status(201).json({
+      documentos: docs.map((d) => ({ ...d, url: storageContratos.getUrl(d.ruta_archivo) })),
+      notificado,
+      adjuntadoEnCorreo,
+    });
   })
 );
 

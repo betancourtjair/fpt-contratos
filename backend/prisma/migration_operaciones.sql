@@ -40,3 +40,9 @@ CREATE TABLE IF NOT EXISTS operaciones_documentos (
 );
 
 CREATE INDEX IF NOT EXISTS idx_operaciones_documentos_solicitud ON operaciones_documentos(solicitud_id);
+
+-- v2: asignacion del caso a una persona de Juridico (la hace Cabeza de Juridico). Los archivos que
+-- sube Juridico se guardan en operaciones_documentos con campo = 'respuesta'.
+ALTER TABLE operaciones_solicitudes ADD COLUMN IF NOT EXISTS asignado_a_id UUID REFERENCES usuarios(id);
+ALTER TABLE operaciones_solicitudes ADD COLUMN IF NOT EXISTS asignado_en TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_operaciones_solicitudes_asignado ON operaciones_solicitudes(asignado_a_id);

@@ -97,13 +97,14 @@ export default function ListaSolicitudesOperaciones() {
                   <th>Club</th>
                   <th>Gerente / Subgerente</th>
                   {gestionaOperaciones && <th>Capturada por</th>}
+                  {gestionaOperaciones && <th>Asignada a</th>}
                   <th>Fecha</th>
                   <th>Estatus</th>
                 </tr>
               </thead>
               <tbody>
                 {solicitudes.length === 0 && (
-                  <tr><td colSpan={gestionaOperaciones ? 7 : 6} className="table-empty">Sin solicitudes.</td></tr>
+                  <tr><td colSpan={gestionaOperaciones ? 8 : 6} className="table-empty">Sin solicitudes.</td></tr>
                 )}
                 {solicitudes.map((s) => (
                   <tr key={s.id}>
@@ -112,6 +113,7 @@ export default function ListaSolicitudesOperaciones() {
                     <td>{s.clubNombre}</td>
                     <td>{s.gerenteNombre}</td>
                     {gestionaOperaciones && <td>{s.solicitanteNombre}</td>}
+                    {gestionaOperaciones && <td>{s.asignadoANombre || <span className="page-header-sub">Sin asignar</span>}</td>}
                     <td>{fmtFecha(s.createdAt)}</td>
                     <td><EstatusOperacionesBadge estatus={s.estatus} /></td>
                   </tr>

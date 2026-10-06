@@ -142,8 +142,10 @@ async function obtenerTokenGraph() {
  * @param {string} destinatario - email del destinatario (o "a@b.com,c@d.com" para varios)
  * @param {string} asunto
  * @param {string} cuerpoHtml
+ * @param {Array<{nombre: string, contentType?: string, buffer: Buffer}>} [adjuntos] - archivos a adjuntar
+ *   (Graph sendMail: el total debe ser < ~3 MB; quien llama decide si adjunta o solo manda liga)
  */
-async function enviarCorreo(destinatario, asunto, cuerpoHtml) {
+async function enviarCorreo(destinatario, asunto, cuerpoHtml, adjuntos = []) {
   const destinatarios = String(destinatario || '')
     .split(',')
     .map((d) => d.trim())
@@ -158,6 +160,7 @@ async function enviarCorreo(destinatario, asunto, cuerpoHtml) {
     console.log('--- [email] MODO DEV: correo NO enviado (faltan variables MS_GRAPH_*) ---');
     console.log(`Para: ${destinatarios.join(', ')}`);
     console.log(`Asunto: ${asunto}`);
+    if (adjuntos.length) console.log(`Adjuntos: ${adjuntos.map((a) => a.nombre).join(', ')}`);
     console.log(`Cuerpo: ${cuerpoHtml}`);
     console.log('---------------------------------------------------------------------');
     return { enviado: false, modo: 'dev' };
@@ -180,9 +183,9 @@ async function enviarCorreo(destinatario, asunto, cuerpoHtml) {
         // Logo como adjunto inline referenciado por cid: en el HTML (ver envolverPlantilla).
         // Si por algún motivo no se pudo leer el archivo del logo, se omite el adjunto en vez
         // de tronar el envío; el correo sale sin logo en ese caso excepcional.
-        ...(logoBase64
-          ? {
-              attachments: [
+        attachments: [
+          ...(logoBase64
+            ? [
                 {
                   '@odata.type': '#microsoft.graph.fileAttachment',
                   name: 'logo-fpt.jpg',
@@ -191,9 +194,15 @@ async function enviarCorreo(destinatario, asunto, cuerpoHtml) {
                   isInline: true,
                   contentId: LOGO_CONTENT_ID,
                 },
-              ],
-            }
-          : {}),
+              ]
+            : []),
+          ...adjuntos.map((a) => ({
+            '@odata.type': '#microsoft.graph.fileAttachment',
+            name: a.nombre,
+            contentType: a.contentType || 'application/octet-stream',
+            contentBytes: a.buffer.toString('base64'),
+          })),
+        ],
       },
       saveToSentItems: true,
     };
