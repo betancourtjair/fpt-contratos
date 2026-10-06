@@ -967,3 +967,10 @@ tbody tr:hover { background: var(--fpt-purple-50); }
 .sidebar-collapsible > .sidebar-nav { padding: 6px 0 4px 6px; }
 .sidebar-section .sidebar-link { font-size: 13.5px; }
 .sidebar-section .sidebar-subgroup-toggle { font-weight: 600; color: rgba(255,255,255,0.92); }
+
+/* Seccion plegada: sin padding ni contenido visible (antes asomaba el borde del enlace activo). */
+.sidebar-collapsible.collapsed > .sidebar-nav {
+  padding-top: 0;
+  padding-bottom: 0;
+  visibility: hidden;
+}
