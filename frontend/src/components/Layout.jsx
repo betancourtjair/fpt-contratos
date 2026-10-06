@@ -1,4 +1,4 @@
-import { Navigate, NavLink, Outlet, useLocation } from 'react-router-dom';
+import { Navigate, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import { useAuth } from '../auth/AuthContext.jsx';
 import fptLogoMark from '../assets/fpt-logo-mark.png';
@@ -59,13 +59,19 @@ function IconoSeccion({ id }) {
 
 // Sección colapsable del menú lateral: el label actúa como botón que expande/contrae el
 // bloque de enlaces, con una flechita que indica el estado actual.
-function SidebarSection({ id, titulo, abierta, onToggle, children }) {
+function SidebarSection({ id, titulo, abierta, onToggle, destino, children }) {
+  const navigate = useNavigate();
+  // Al ABRIR una seccion se lleva al usuario a su dashboard/inicio (al cerrarla no navega).
+  function alternar() {
+    onToggle(id);
+    if (!abierta && destino) navigate(destino);
+  }
   return (
     <div className="sidebar-section">
       <button
         type="button"
         className={`sidebar-section-label sidebar-section-toggle${abierta ? ' open' : ''}`}
-        onClick={() => onToggle(id)}
+        onClick={alternar}
         aria-expanded={abierta}
       >
         <span className="sidebar-section-title"><IconoSeccion id={id} />{titulo}</span>
@@ -137,6 +143,7 @@ export default function Layout() {
           <SidebarSection
             id="operaciones"
             titulo="Operaciones"
+            destino="/operaciones"
             abierta={secciones.operaciones !== false}
             onToggle={toggleSeccion}
           >
@@ -158,6 +165,7 @@ export default function Layout() {
             <SidebarSection
               id="contratos"
               titulo="Contratos"
+              destino="/"
               abierta={secciones.contratos !== false}
               onToggle={toggleSeccion}
             >
@@ -173,6 +181,7 @@ export default function Layout() {
               <SidebarSection
                 id="franquicias"
                 titulo="Franquicias"
+                destino="/franquicias"
                 abierta={secciones.franquicias !== false}
                 onToggle={toggleSeccion}
               >
@@ -187,6 +196,7 @@ export default function Layout() {
             <SidebarSection
               id="arrendamientos"
               titulo="Arrendamientos"
+              destino="/arrendamientos"
               abierta={secciones.arrendamientos !== false}
               onToggle={toggleSeccion}
             >
@@ -205,6 +215,7 @@ export default function Layout() {
               <SidebarSection
                 id="operaciones"
                 titulo="Operaciones"
+                destino="/operaciones"
                 abierta={secciones.operaciones !== false}
                 onToggle={toggleSeccion}
               >
