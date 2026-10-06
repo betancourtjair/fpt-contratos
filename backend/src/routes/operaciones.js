@@ -23,6 +23,16 @@ router.use(requireAuth, requireRole(...ROLES_MODULO_OPERACIONES));
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 40 * 1024 * 1024, files: 8 } });
 
+// multer entrega originalname como latin1: un archivo "Cómo.pptx" llega como "CÃ³mo.pptx".
+// Se reinterpreta como UTF-8 cuando el resultado es valido.
+function normalizarNombresArchivos(req, res, next) {
+  for (const f of req.files || []) {
+    const utf8 = Buffer.from(f.originalname, 'latin1').toString('utf8');
+    if (!utf8.includes('\uFFFD')) f.originalname = utf8;
+  }
+  next();
+}
+
 const ESTATUS = ['recibida', 'en_proceso', 'atendida'];
 
 // Definicion de cada formulario: que campos de `datos` son obligatorios, en que campo se
@@ -217,6 +227,7 @@ router.get(
 router.post(
   '/solicitudes',
   upload.array('archivos', 8),
+  normalizarNombresArchivos,
   asyncHandler(async (req, res) => {
     const body = req.body || {};
     const def = TIPOS[body.tipo];
@@ -444,6 +455,7 @@ router.post(
   '/solicitudes/:id/documentos',
   requireRole(...ROLES_GESTION_OPERACIONES),
   upload.array('archivos', 8),
+  normalizarNombresArchivos,
   asyncHandler(async (req, res) => {
     const archivos = req.files || [];
     if (archivos.length === 0) throw badRequest('Adjunta al menos un archivo.');
