@@ -16,6 +16,33 @@ const CLAUSULA_VACIA = {
   clauseType: '', pageNumber: '', sectionNumber: '', leaseDocumentHeader: '', aiSummary: '', originalLanguage: '', leaseIsSilent: false,
 };
 
+const TITULO_OPCION_RENOVACION = 'Opción de renovación';
+
+// Las opciones de renovación migradas de LeaseCake se guardaron como nota con el detalle en JSON.
+// Se interpretan aqui para mostrarlas como tabla en lugar del texto crudo.
+function parsearOpcionRenovacion(n) {
+  if (n.titulo !== TITULO_OPCION_RENOVACION || typeof n.nota !== 'string') return null;
+  try {
+    const o = JSON.parse(n.nota);
+    return o && typeof o === 'object' && o.start_date ? o : null;
+  } catch {
+    return null;
+  }
+}
+
+// Fechas "YYYY-MM-DD" sin desfase de zona horaria.
+function fechaSolo(valor) {
+  if (!valor) return '—';
+  const d = new Date(`${String(valor).slice(0, 10)}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString('es-MX', { year: 'numeric', month: 'short', day: '2-digit' });
+}
+
+function estatusOpcion(o) {
+  if (o.is_exercised === 'Yes') return 'Ejercida';
+  if (o.is_declined === 'Yes') return 'Declinada';
+  return 'Pendiente';
+}
+
 export default function LeaseDetalle() {
   const { id } = useParams();
   const { esAdmin } = useAuth();
@@ -27,6 +54,14 @@ export default function LeaseDetalle() {
   const [criticalClauses, setCriticalClauses] = useState([]);
   const [notes, setNotes] = useState([]);
   const [companies, setCompanies] = useState([]);
+  const opcionesRenovacion = useMemo(
+    () => notes
+      .map((n) => ({ id: n.id, ...(parsearOpcionRenovacion(n) || {}), _ok: !!parsearOpcionRenovacion(n) }))
+      .filter((o) => o._ok)
+      .sort((a, b) => String(a.start_date).localeCompare(String(b.start_date))),
+    [notes]
+  );
+  const notasGenerales = useMemo(() => notes.filter((n) => !parsearOpcionRenovacion(n)), [notes]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState('');
 
@@ -312,13 +347,37 @@ export default function LeaseDetalle() {
         )}
       </div>
 
+      {opcionesRenovacion.length > 0 && (
+        <div className="card">
+          <div className="card-title">Opciones de renovación<span className="tag-pill">{opcionesRenovacion.length}</span></div>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Periodo</th><th>Años</th><th>Renta base</th><th>Estatus</th><th>Siguiente opción</th></tr>
+              </thead>
+              <tbody>
+                {opcionesRenovacion.map((o) => (
+                  <tr key={o.id}>
+                    <td>{fechaSolo(o.start_date)} – {fechaSolo(o.end_date)}</td>
+                    <td>{o.years ?? '—'}</td>
+                    <td>{formatMonto(o.total_base_rent ?? o.base_rent)}</td>
+                    <td>{estatusOpcion(o)}</td>
+                    <td>{o.is_next === 'Yes' ? 'Sí' : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       <div className="card">
         <div className="card-title">Notas</div>
-        {notes.length === 0 ? (
+        {notasGenerales.length === 0 ? (
           <div className="empty-state">Sin notas registradas.</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 }}>
-            {notes.map((n) => (
+            {notasGenerales.map((n) => (
               <div key={n.id} style={{ borderBottom: '1px solid var(--color-border)', paddingBottom: 8 }}>
                 {n.titulo && <strong>{n.titulo}</strong>}
                 <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>
