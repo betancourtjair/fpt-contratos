@@ -5,6 +5,7 @@ const { revisarVencimientos } = require('../utils/vencimientos');
 const { revisarFranquicias } = require('../utils/franquicias');
 const { revisarPendientes: revisarFirmasPendientes } = require('../utils/firmaElectronica');
 const { revisarAlertasArrendamientos } = require('../utils/alertasArrendamientos');
+const { enviarReporteMensualArrendamientos } = require('../utils/reporteMensualArrendamientos');
 const { ROLES_NIVEL_ADMIN } = require('../utils/roles');
 
 const router = express.Router();
@@ -50,6 +51,21 @@ router.post(
   asyncHandler(async (req, res) => {
     const resumen = await revisarAlertasArrendamientos();
     res.json({ resumen });
+  })
+);
+
+// POST /api/jobs/reporte-mensual-arrendamientos
+// Reporte mensual de vencimientos de Arrendamientos (semáforo 120/90 días) para Jurídico y Cabeza
+// de Jurídico; corre solo (ver src/jobs/scheduler.js). Con { "soloA": "correo" } manda solo una
+// prueba a ese correo sin registrar el envío; con { "forzar": true } reenvía el del mes.
+router.post(
+  '/reporte-mensual-arrendamientos',
+  requireAuth,
+  requireRole(...ROLES_NIVEL_ADMIN),
+  asyncHandler(async (req, res) => {
+    const { soloA, forzar } = req.body || {};
+    const resultado = await enviarReporteMensualArrendamientos({ soloA: soloA || null, forzar: !!forzar });
+    res.json(resultado);
   })
 );
 

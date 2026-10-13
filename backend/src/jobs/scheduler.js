@@ -19,6 +19,7 @@ const { revisarVencimientos } = require('../utils/vencimientos');
 const { revisarFranquicias } = require('../utils/franquicias');
 const { revisarPendientes: revisarFirmasPendientes } = require('../utils/firmaElectronica');
 const { revisarAlertasArrendamientos } = require('../utils/alertasArrendamientos');
+const { enviarReporteMensualArrendamientos } = require('../utils/reporteMensualArrendamientos');
 const documenso = require('../documensoClient');
 
 const ZONA_HORARIA = 'America/Mexico_City';
@@ -82,6 +83,22 @@ async function ejecutarRevisionAlertasArrendamientosSegura(origen) {
   }
 }
 
+let enviandoReporteArr = false;
+async function ejecutarReporteMensualArrendamientosSeguro(origen) {
+  if (enviandoReporteArr) return;
+  enviandoReporteArr = true;
+  try {
+    const r = await enviarReporteMensualArrendamientos();
+    if (r.enviado) {
+      console.log(`[scheduler] Reporte mensual de Arrendamientos (${origen}) enviado a ${r.destinatarios} destinatario(s).`);
+    }
+  } catch (err) {
+    console.error(`[scheduler] Error al enviar el reporte mensual de Arrendamientos (${origen}):`, err);
+  } finally {
+    enviandoReporteArr = false;
+  }
+}
+
 let revisandoFirmas = false;
 async function ejecutarRevisionFirmasSegura(origen) {
   if (!documenso.configurado()) return; // integración no configurada: no hay nada que revisar
@@ -111,12 +128,17 @@ function iniciarProgramador() {
     ejecutarRevisionSegura('arranque del servidor');
     ejecutarRevisionFirmasSegura('arranque del servidor');
     ejecutarRevisionAlertasArrendamientosSegura('arranque del servidor');
+    ejecutarReporteMensualArrendamientosSeguro('arranque del servidor');
   }, RETRASO_INICIAL_MS);
 
   cron.schedule(EXPRESION_DIARIA, () => {
     ejecutarRevisionSegura('cron diario 07:00');
     ejecutarRevisionAlertasArrendamientosSegura('cron diario 07:00');
   }, {
+    timezone: ZONA_HORARIA,
+  });
+  // Reporte mensual de vencimientos de Arrendamientos: día 1 de cada mes a las 07:00.
+  cron.schedule('0 7 1 * *', () => ejecutarReporteMensualArrendamientosSeguro('cron mensual día 1'), {
     timezone: ZONA_HORARIA,
   });
   cron.schedule(EXPRESION_FIRMAS, () => ejecutarRevisionFirmasSegura('cron cada 2 horas'), {
