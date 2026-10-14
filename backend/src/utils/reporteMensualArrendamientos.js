@@ -6,8 +6,8 @@
 //   - AMARILLO: de 91 a 180 días.
 //   - Verde:    más de 180 días (dentro de los próximos 12 meses); solo se cuenta, no se lista.
 //
-// Se envía una vez por mes (la bitácora reportes_mensuales_log evita duplicados), con copia a
-// REPORTE_ARR_COPIA (por defecto jair@fpt.com.mx). Lo dispara el programador interno
+// Se envía una vez por mes (la bitácora reportes_mensuales_log evita duplicados), con copia permanente a
+// Jair, Alejandro y David (COPIA_FIJA; REPORTE_ARR_COPIA suma mas). Lo dispara el programador interno
 // (src/jobs/scheduler.js) el día 1 de cada mes a las 07:00 (hora de CDMX) y también al arrancar el
 // servidor si el reporte del mes aún no se ha enviado: así, tras el primer despliegue sale de
 // inmediato, y si Render estaba dormido el día 1, sale en cuanto despierta.
@@ -22,9 +22,13 @@ const URL_DASHBOARD = process.env.FRONTEND_URL
   ? `${process.env.FRONTEND_URL.replace(/\/$/, '')}/#/arrendamientos`
   : 'https://contratos.fpt.com.mx/#/arrendamientos';
 
-// Copia fija del reporte (separada por comas). Por defecto, Jair (TI).
-const COPIA_A = (process.env.REPORTE_ARR_COPIA || 'jair@fpt.com.mx')
-  .split(',').map((c) => c.trim()).filter(Boolean);
+// Copia permanente del reporte: siempre se incluyen estos correos. REPORTE_ARR_COPIA permite
+// sumar mas (separados por comas) sin tocar el codigo.
+const COPIA_FIJA = ['jair@fpt.com.mx', 'alejandro@fpt.com.mx', 'david@fpt.com.mx'];
+const COPIA_A = [
+  ...COPIA_FIJA,
+  ...(process.env.REPORTE_ARR_COPIA || '').split(',').map((c) => c.trim()).filter(Boolean),
+];
 
 const COLOR = {
   rojo: { fondo: '#fde8e8', texto: '#9b1c1c', borde: '#f5b5b5', etiqueta: 'ROJO' },
