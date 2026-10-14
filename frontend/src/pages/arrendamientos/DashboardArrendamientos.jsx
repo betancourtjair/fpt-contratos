@@ -4,6 +4,37 @@ import { api } from '../../api.js';
 import Spinner from '../../components/Spinner.jsx';
 import { formatMonto, formatFecha, diasRestantes } from '../../utils.js';
 
+// Semaforo de vencimiento de leases (segun los dias que faltan para expiration_date):
+// rojo = 90 dias o menos (incluye ya vencidos que siguen activos), amarillo = 91 a 180, verde = mas de 180.
+// Mantener sincronizado con backend/src/utils/reporteMensualArrendamientos.js (reporte mensual por correo).
+const DIAS_ROJO = 90;
+const DIAS_AMARILLO = 180;
+const SEMAFORO = {
+  rojo: { etiqueta: 'Rojo', fg: '#9b1c1c', bg: '#fde8e8', borde: '#f5b5b5' },
+  amarillo: { etiqueta: 'Amarillo', fg: '#8a6100', bg: '#fff6d6', borde: '#f1de8f' },
+  verde: { etiqueta: 'Verde', fg: '#1d7a46', bg: '#e3f4ea', borde: '#a9dcbf' },
+};
+function colorSemaforo(dias) {
+  if (dias === null || dias === undefined) return null;
+  if (dias <= DIAS_ROJO) return 'rojo';
+  if (dias <= DIAS_AMARILLO) return 'amarillo';
+  return 'verde';
+}
+function SemaforoPill({ color }) {
+  const c = SEMAFORO[color];
+  if (!c) return null;
+  return (
+    <span
+      style={{
+        display: 'inline-block', padding: '2px 10px', borderRadius: 999, fontSize: 12, fontWeight: 600,
+        color: c.fg, background: c.bg, border: `1px solid ${c.borde}`,
+      }}
+    >
+      {c.etiqueta}
+    </span>
+  );
+}
+
 export default function DashboardArrendamientos() {
   const [data, setData] = useState(null);
   const [cargando, setCargando] = useState(true);
@@ -33,6 +64,11 @@ export default function DashboardArrendamientos() {
   const proximosVencimientos = data?.proximosVencimientos || [];
   const porBrand = data?.porBrand || [];
   const fechaInicioPagoRenta = data?.fechaInicioPagoRenta || [];
+  const conteoSemaforo = { rojo: 0, amarillo: 0, verde: 0 };
+  for (const v of proximosVencimientos) {
+    const c = colorSemaforo(diasRestantes(v.expirationDate));
+    if (c) conteoSemaforo[c] += 1;
+  }
 
   return (
     <div>
@@ -69,6 +105,13 @@ export default function DashboardArrendamientos() {
             Próximos vencimientos (365 días)
             {proximosVencimientos.length > 0 && <span className="tag-pill">{proximosVencimientos.length}</span>}
           </div>
+          {proximosVencimientos.length > 0 && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12, alignItems: 'center' }}>
+              <SemaforoPill color="rojo" /><span className="muted" style={{ fontSize: 12 }}>{conteoSemaforo.rojo} · 90 días o menos</span>
+              <SemaforoPill color="amarillo" /><span className="muted" style={{ fontSize: 12 }}>{conteoSemaforo.amarillo} · 91 a 180 días</span>
+              <SemaforoPill color="verde" /><span className="muted" style={{ fontSize: 12 }}>{conteoSemaforo.verde} · más de 180 días</span>
+            </div>
+          )}
           {proximosVencimientos.length === 0 ? (
             <div className="empty-state">Sin leases próximos a vencer.</div>
           ) : (
@@ -76,6 +119,7 @@ export default function DashboardArrendamientos() {
               <table>
                 <thead>
                   <tr>
+                    <th>Semáforo</th>
                     <th>Ubicación</th>
                     <th>Vence</th>
                     <th>Aviso de renovación</th>
@@ -87,6 +131,7 @@ export default function DashboardArrendamientos() {
                     const dias = diasRestantes(v.expirationDate);
                     return (
                       <tr key={v.leaseId}>
+                        <td><SemaforoPill color={colorSemaforo(dias)} /></td>
                         <td>
                           {v.locationId ? (
                             <Link to={`/arrendamientos/ubicaciones/${v.locationId}`}>{v.locationNombre}</Link>

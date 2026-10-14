@@ -3,8 +3,8 @@
 // Es el equivalente por correo del dashboard de Arrendamientos ("Próximos vencimientos"), con
 // semáforo según los días que faltan para el vencimiento del lease (expiration_date):
 //   - ROJO:     90 días o menos (incluye leases activos cuya fecha de vencimiento ya pasó).
-//   - AMARILLO: de 91 a 120 días.
-//   - Verde:    más de 120 días; solo se cuenta (no se lista) para no hacer largo el correo.
+//   - AMARILLO: de 91 a 180 días.
+//   - Verde:    más de 180 días (dentro de los próximos 12 meses); solo se cuenta, no se lista.
 //
 // Se envía una vez por mes (la bitácora reportes_mensuales_log evita duplicados), con copia a
 // REPORTE_ARR_COPIA (por defecto jair@fpt.com.mx). Lo dispara el programador interno
@@ -17,7 +17,7 @@ const { enviarCorreo } = require('../email');
 
 const TIPO_REPORTE = 'arrendamientos_vencimientos';
 const DIAS_ROJO = Number(process.env.REPORTE_ARR_DIAS_ROJO || 90);
-const DIAS_AMARILLO = Number(process.env.REPORTE_ARR_DIAS_AMARILLO || 120);
+const DIAS_AMARILLO = Number(process.env.REPORTE_ARR_DIAS_AMARILLO || 180);
 const URL_DASHBOARD = process.env.FRONTEND_URL
   ? `${process.env.FRONTEND_URL.replace(/\/$/, '')}/#/arrendamientos`
   : 'https://contratos.fpt.com.mx/#/arrendamientos';

@@ -42,7 +42,7 @@ router.get(
       query(`
         SELECT l.id AS location_id, l.nombre AS location_nombre, le.id AS lease_id, le.expiration_date, le.renewal_notice_deadline
         FROM leases le JOIN locations l ON l.id = le.location_id
-        WHERE le.estatus = 'activo' AND le.expiration_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '365 days'
+        WHERE le.estatus = 'activo' AND le.expiration_date <= CURRENT_DATE + INTERVAL '365 days'
         ORDER BY le.expiration_date ASC
       `),
       query(`
