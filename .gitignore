@@ -20,3 +20,6 @@ backend/data_migration/
 *.pdf
 
 Claude outputs/
+
+backend/.env
+backend/usuarios_operaciones_credenciales.csv
