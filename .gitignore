@@ -18,3 +18,5 @@ dist/*.zip
 # landlord/tenant, etc.) — dato sensible de un solo uso, no pertenece al historial de git.
 backend/data_migration/
 *.pdf
+
+Claude outputs/
