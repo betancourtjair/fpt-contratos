@@ -31,6 +31,65 @@ const NUEVO_USUARIO_VACIO = {
   debeCambiarPassword: true,
 };
 
+
+// ---- Importacion masiva por CSV ----
+const COLUMNAS_CSV = ['nombre', 'email', 'rol', 'area', 'jefe_directo_email', 'password'];
+const PLANTILLA_CSV =
+  COLUMNAS_CSV.join(',') + '\r\n' +
+  'PF Ejemplo Club,pfejemplo@fpt.com.mx,operaciones,PF Ejemplo Club,,\r\n';
+
+function parseCsv(texto) {
+  const t = texto.replace(/^\uFEFF/, '');
+  const primera = t.split(/\r?\n/)[0] || '';
+  const sep = (primera.match(/;/g) || []).length > (primera.match(/,/g) || []).length ? ';' : ',';
+  const filas = [];
+  let fila = [];
+  let campo = '';
+  let comillas = false;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (comillas) {
+      if (c === '"' && t[i + 1] === '"') { campo += '"'; i++; }
+      else if (c === '"') comillas = false;
+      else campo += c;
+    } else if (c === '"') comillas = true;
+    else if (c === sep) { fila.push(campo); campo = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && t[i + 1] === '\n') i++;
+      fila.push(campo); campo = '';
+      if (fila.some((x) => x.trim() !== '')) filas.push(fila);
+      fila = [];
+    } else campo += c;
+  }
+  fila.push(campo);
+  if (fila.some((x) => x.trim() !== '')) filas.push(fila);
+  if (filas.length < 2) return [];
+  const enc = filas[0].map((h) => h.trim().toLowerCase());
+  return filas.slice(1).map((f) => {
+    const o = {};
+    enc.forEach((h, i) => { o[h] = (f[i] || '').trim(); });
+    return {
+      nombre: o.nombre || '', email: o.email || o.correo || '', rol: o.rol || '',
+      area: o.area || '', jefeEmail: o.jefe_directo_email || o.jefe || '', password: o.password || '',
+    };
+  });
+}
+
+function descargarCsv(nombreArchivo, contenido) {
+  const blob = new Blob(['\uFEFF' + contenido], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nombreArchivo;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function csvCampo(v) {
+  const s = String(v ?? '');
+  return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
 export default function Usuarios() {
   const { usuario: usuarioActual } = useAuth();
   const esSuperAdmin = usuarioActual?.rol === 'super_admin';
@@ -66,6 +125,53 @@ export default function Usuarios() {
   const [formEditar, setFormEditar] = useState(null);
   const [errorModalEditar, setErrorModalEditar] = useState('');
   const [guardandoEditar, setGuardandoEditar] = useState(false);
+
+  // Importacion masiva por CSV
+  const [mostrarImportar, setMostrarImportar] = useState(false);
+  const [filasImport, setFilasImport] = useState([]);
+  const [enviarCorreosImport, setEnviarCorreosImport] = useState(false);
+  const [importando, setImportando] = useState(false);
+  const [errorImport, setErrorImport] = useState('');
+  const [resultadoImport, setResultadoImport] = useState(null);
+
+  function abrirImportar() {
+    setFilasImport([]); setErrorImport(''); setResultadoImport(null); setEnviarCorreosImport(false);
+    setMostrarImportar(true);
+  }
+  function cerrarImportar() {
+    if (importando) return;
+    setMostrarImportar(false);
+    if (resultadoImport) cargar();
+  }
+  async function leerArchivoCsv(e) {
+    const archivo = e.target.files?.[0];
+    setErrorImport(''); setResultadoImport(null);
+    if (!archivo) return;
+    try {
+      const filas = parseCsv(await archivo.text());
+      if (filas.length === 0) setErrorImport('No se encontraron filas. Usa la plantilla (con encabezados) y llena al menos una fila.');
+      setFilasImport(filas);
+    } catch (err) {
+      setErrorImport('No se pudo leer el archivo.');
+    }
+  }
+  async function importarUsuarios() {
+    setImportando(true); setErrorImport('');
+    try {
+      const data = await api.post('/usuarios/importar', { usuarios: filasImport, enviarCorreos: enviarCorreosImport });
+      setResultadoImport(data);
+    } catch (err) {
+      setErrorImport(err.message || 'No se pudo importar.');
+    } finally {
+      setImportando(false);
+    }
+  }
+  function descargarCredenciales() {
+    const creados = (resultadoImport?.resultados || []).filter((r) => r.estado === 'creado');
+    const csv = ['nombre,email,password_temporal', ...creados.map((r) => [r.nombre, r.email, r.passwordTemporal].map(csvCampo).join(','))].join('\r\n');
+    descargarCsv('usuarios_credenciales.csv', csv + '\r\n');
+  }
+  function descargarPlantilla() { descargarCsv('plantilla_usuarios.csv', PLANTILLA_CSV); }
 
   async function cargar() {
     setCargando(true);
@@ -264,7 +370,10 @@ export default function Usuarios() {
           <h1>Usuarios</h1>
           <p className="page-header-sub">Administra roles y acceso de los usuarios de la plataforma.</p>
         </div>
-        <button className="btn btn-primary" onClick={abrirModal}>+ Nuevo usuario</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn" onClick={abrirImportar}>Importar CSV</button>
+          <button className="btn btn-primary" onClick={abrirModal}>+ Nuevo usuario</button>
+        </div>
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}
@@ -361,6 +470,84 @@ export default function Usuarios() {
               )}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {mostrarImportar && (
+        <div className="modal-backdrop" onClick={cerrarImportar}>
+          <div className="modal" style={{ maxWidth: 760 }} onClick={(e) => e.stopPropagation()}>
+            <h3>Importar usuarios desde CSV</h3>
+            <p className="page-header-sub">
+              Descarga la plantilla, llénala (rol vacío = solicitante; jefe directo vacío = sin jefe; password vacío =
+              se genera una temporal) y súbela. Los correos que ya existen se omiten.
+            </p>
+            {errorImport && <div className="alert alert-error">{errorImport}</div>}
+
+            {!resultadoImport && (
+              <>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+                  <button type="button" className="btn" onClick={descargarPlantilla}>Descargar plantilla</button>
+                  <input type="file" accept=".csv,text/csv" onChange={leerArchivoCsv} />
+                </div>
+                {filasImport.length > 0 && (
+                  <>
+                    <div className="table-wrap" style={{ maxHeight: 260, overflow: 'auto' }}>
+                      <table>
+                        <thead><tr><th>#</th><th>Nombre</th><th>Correo</th><th>Rol</th><th>Jefe directo</th></tr></thead>
+                        <tbody>
+                          {filasImport.map((f, i) => (
+                            <tr key={i}>
+                              <td>{i + 1}</td><td>{f.nombre}</td><td>{f.email}</td>
+                              <td>{f.rol || 'solicitante'}</td><td>{f.jefeEmail || 'sin jefe'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <label style={{ display: 'block', margin: '12px 0' }}>
+                      <input type="checkbox" checked={enviarCorreosImport} onChange={(e) => setEnviarCorreosImport(e.target.checked)} />
+                      {' '}Enviar correo de bienvenida con la contraseña temporal a cada usuario
+                    </label>
+                  </>
+                )}
+                <div className="modal-actions" style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                  <button type="button" className="btn" onClick={cerrarImportar} disabled={importando}>Cancelar</button>
+                  <button type="button" className="btn btn-primary" onClick={importarUsuarios} disabled={importando || filasImport.length === 0}>
+                    {importando ? 'Importando…' : `Importar ${filasImport.length} usuario(s)`}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {resultadoImport && (
+              <>
+                <div className="alert alert-success">
+                  Creados: {resultadoImport.creados} · Omitidos: {resultadoImport.omitidos} · Con error: {resultadoImport.errores}
+                </div>
+                {resultadoImport.creados > 0 && (
+                  <p>
+                    <button type="button" className="btn btn-primary" onClick={descargarCredenciales}>Descargar contraseñas temporales (CSV)</button>
+                    {' '}Guárdalo y bórralo después de entregar las contraseñas: no se podrán volver a consultar.
+                  </p>
+                )}
+                {(resultadoImport.omitidos > 0 || resultadoImport.errores > 0) && (
+                  <div className="table-wrap" style={{ maxHeight: 220, overflow: 'auto' }}>
+                    <table>
+                      <thead><tr><th>#</th><th>Correo</th><th>Estado</th><th>Detalle</th></tr></thead>
+                      <tbody>
+                        {resultadoImport.resultados.filter((r) => r.estado !== 'creado').map((r) => (
+                          <tr key={r.fila}><td>{r.fila}</td><td>{r.email}</td><td>{r.estado}</td><td>{r.detalle}</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+                  <button type="button" className="btn" onClick={cerrarImportar}>Cerrar</button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
 

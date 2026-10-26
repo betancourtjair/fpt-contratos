@@ -6,6 +6,7 @@ const { badRequest, forbidden, notFound, traducirErrorPostgres } = require('../u
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { enviarCorreo } = require('../email');
 const { ROLES_NIVEL_ADMIN } = require('../utils/roles');
+const crypto = require('crypto');
 
 const router = express.Router();
 const ROLES_VALIDOS = ['super_admin', 'admin', 'juridico', 'cabeza_juridico', 'aprobador', 'solicitante', 'ceo', 'cfo', 'operaciones', 'lectura'];
@@ -173,6 +174,86 @@ router.patch(
     }
 
     res.json({ usuario: serializarUsuario(rows[0]) });
+  })
+);
+
+// POST /api/usuarios/importar (admin+) - alta masiva desde CSV (el frontend parsea el archivo).
+// Body: { usuarios: [{ nombre, email, rol, area, jefeEmail, password }], enviarCorreos }
+// - rol vacio = solicitante; jefeEmail vacio = sin jefe directo; password vacio = se genera una
+//   temporal aleatoria. Siempre debe_cambiar_password = true.
+// - Idempotente por correo: los que ya existen se omiten. No se envia correo de bienvenida salvo
+//   que enviarCorreos === true. Devuelve el resultado por fila (incluye la contrasena temporal
+//   solo de los usuarios creados, para que el admin la entregue).
+router.post(
+  '/importar',
+  requireAuth,
+  requireRole(...ROLES_NIVEL_ADMIN),
+  asyncHandler(async (req, res) => {
+    const filas = Array.isArray(req.body?.usuarios) ? req.body.usuarios : null;
+    if (!filas || filas.length === 0) throw badRequest('usuarios es requerido (lista no vacia).');
+    if (filas.length > 500) throw badRequest('Maximo 500 usuarios por importacion.');
+    const enviarCorreos = req.body?.enviarCorreos === true;
+    const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+    const genPass = () => {
+      let p = '';
+      for (let i = 0; i < 10; i++) p += abc[crypto.randomInt(abc.length)];
+      return p + crypto.randomInt(10) + '!';
+    };
+    const resultados = [];
+    const vistos = new Set();
+    for (let i = 0; i < filas.length; i++) {
+      const f = filas[i] || {};
+      const fila = i + 1;
+      const nombre = String(f.nombre || '').trim();
+      const email = String(f.email || '').trim().toLowerCase();
+      const rol = String(f.rol || '').trim().toLowerCase() || 'solicitante';
+      const area = String(f.area || '').trim() || null;
+      const jefeEmail = String(f.jefeEmail || '').trim().toLowerCase();
+      let password = String(f.password || '').trim();
+      const base = { fila, nombre, email };
+      if (!nombre || !email) { resultados.push({ ...base, estado: 'error', detalle: 'nombre y email son requeridos' }); continue; }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { resultados.push({ ...base, estado: 'error', detalle: 'correo invalido' }); continue; }
+      if (vistos.has(email)) { resultados.push({ ...base, estado: 'omitido', detalle: 'correo repetido en el archivo' }); continue; }
+      vistos.add(email);
+      if (!ROLES_VALIDOS.includes(rol)) { resultados.push({ ...base, estado: 'error', detalle: 'rol invalido: ' + rol }); continue; }
+      if (ROLES_SOLO_SUPER_ADMIN.includes(rol) && req.usuario.rol !== 'super_admin') {
+        resultados.push({ ...base, estado: 'error', detalle: 'solo un super_admin puede asignar el rol ' + rol }); continue;
+      }
+      if (password && password.length < 8) { resultados.push({ ...base, estado: 'error', detalle: 'la contrasena debe tener al menos 8 caracteres' }); continue; }
+      try {
+        const ex = await query('SELECT 1 FROM usuarios WHERE lower(email) = $1', [email]);
+        if (ex.rowCount) { resultados.push({ ...base, estado: 'omitido', detalle: 'ya existe' }); continue; }
+        let jefeId = null;
+        if (jefeEmail) {
+          const j = await query('SELECT id FROM usuarios WHERE lower(email) = $1', [jefeEmail]);
+          if (!j.rowCount) { resultados.push({ ...base, estado: 'error', detalle: 'jefe directo no encontrado: ' + jefeEmail }); continue; }
+          jefeId = j.rows[0].id;
+        }
+        if (!password) password = genPass();
+        const hash = await bcrypt.hash(password, 10);
+        await query(
+          'INSERT INTO usuarios (email, nombre, password_hash, rol, area, jefe_directo_id, debe_cambiar_password) VALUES ($1,$2,$3,$4,$5,$6,true)',
+          [email, nombre, hash, rol, area, jefeId]
+        );
+        if (enviarCorreos) {
+          try {
+            await enviarCorreo(
+              email,
+              'Acceso a FPT Contratos',
+              '<p>Se creo una cuenta para ti en <b>FPT Contratos</b>.</p><p><b>Usuario:</b> ' + email + '<br/><b>Contrasena temporal:</b> ' + password + '</p><p>Al iniciar sesion se te pedira cambiarla.</p><p><a href="' + (process.env.FRONTEND_URL || '') + '">Ir a FPT Contratos</a></p>'
+            );
+          } catch (err) {
+            console.error('Error enviando correo de bienvenida (importacion):', err);
+          }
+        }
+        resultados.push({ ...base, estado: 'creado', rol, passwordTemporal: password });
+      } catch (err) {
+        const t = traducirErrorPostgres(err);
+        resultados.push({ ...base, estado: 'error', detalle: t ? t.message : err.message });
+      }
+    }
+    const cuenta = (e) => resultados.filter((r) => r.estado === e).length;
+    res.json({ creados: cuenta('creado'), omitidos: cuenta('omitido'), errores: cuenta('error'), resultados });
   })
 );
 
