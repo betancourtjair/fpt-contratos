@@ -89,6 +89,14 @@ async function generarFolio(client, anio = new Date().getFullYear()) {
   return `${prefijo}${String(n).padStart(4, '0')}`;
 }
 
+
+async function listarDocumentos(solicitudId) {
+  const { rows } = await query(
+    `SELECT d.*, us.nombre AS subido_por_nombre FROM arr_solicitud_documentos d LEFT JOIN usuarios us ON us.id = d.subido_por_id
+     WHERE d.solicitud_id = $1 ORDER BY d.created_at ASC`, [solicitudId]);
+  return rows.map((d) => ({ ...d, url: storageContratos.getUrl(d.ruta_archivo) }));
+}
+
 // Definicion del formulario (para que el frontend arme la pantalla).
 router.get('/formulario', (req, res) => {
   if (req.usuario.rol === 'operaciones') throw forbidden('Sin acceso.');
@@ -251,6 +259,48 @@ router.post('/:id/documentos', requireRole(...ROLES_GESTION), upload.array('arch
     `SELECT d.*, us.nombre AS subido_por_nombre FROM arr_solicitud_documentos d LEFT JOIN usuarios us ON us.id = d.subido_por_id
      WHERE d.solicitud_id = $1 ORDER BY d.created_at ASC`, [s.id]);
   res.status(201).json({ documentos: docs.map((d) => ({ ...d, url: storageContratos.getUrl(d.ruta_archivo) })) });
+}));
+
+// El solicitante puede adjuntar (o completar despues) los documentos de su solicitud mientras no
+// este atendida; un archivo por documento (el nombre del campo es el id del documento).
+router.post('/:id/documentos-solicitante', upload.any(), normalizarNombresArchivos, asyncHandler(async (req, res) => {
+  const { rows } = await query('SELECT * FROM arr_solicitudes WHERE id = $1', [req.params.id]);
+  const s = rows[0];
+  if (!s) throw notFound('Solicitud no encontrada.');
+  const esDueno = s.solicitante_id === req.usuario.id;
+  if (!esDueno && !(esGestor(req.usuario) && puedeTrabajar(req.usuario, s))) throw forbidden('No puedes adjuntar documentos a esta solicitud.');
+  if (esDueno && s.estatus === 'atendida' && !esGestor(req.usuario)) throw forbidden('La solicitud ya fue atendida.');
+  const archivos = (req.files || []).filter((f) => form.IDS_DOCUMENTOS.includes(f.fieldname));
+  if (!archivos.length) throw badRequest('Adjunta al menos un archivo.');
+  for (const a of archivos) {
+    const ruta = await storageContratos.save({
+      buffer: a.buffer, originalname: a.originalname, contratoId: s.id, carpetaBase: 'arrendamientos-solicitudes',
+      tipoContratoNombre: 'Arrendamientos - Solicitudes', folio: s.folio, tituloContrato: ETIQUETA_TRAMITE[s.tipo_tramite] || s.tipo_tramite,
+      contraparteNombre: s.arrendador_nombre, estatusLabel: 'Recibida',
+    });
+    await query('INSERT INTO arr_solicitud_documentos (solicitud_id, campo, nombre_archivo, ruta_archivo, subido_por_id) VALUES ($1,$2,$3,$4,$5)',
+      [s.id, a.fieldname, a.originalname, ruta, req.usuario.id]);
+  }
+  await query('UPDATE arr_solicitudes SET updated_at = now() WHERE id = $1', [s.id]);
+  res.status(201).json({ documentos: await listarDocumentos(s.id) });
+}));
+
+// Eliminar un documento cargado por error: quien capturo la solicitud (mientras no este atendida)
+// o Juridico / Cabeza (la persona asignada). La solicitud puede quedar con el documento pendiente.
+router.delete('/:id/documentos/:docId', asyncHandler(async (req, res) => {
+  const { rows } = await query('SELECT * FROM arr_solicitudes WHERE id = $1', [req.params.id]);
+  const s = rows[0];
+  if (!s) throw notFound('Solicitud no encontrada.');
+  const { rows: dr } = await query('SELECT * FROM arr_solicitud_documentos WHERE id = $1 AND solicitud_id = $2', [req.params.docId, s.id]);
+  const d = dr[0];
+  if (!d) throw notFound('Documento no encontrado.');
+  const esDueno = s.solicitante_id === req.usuario.id && d.campo !== 'respuesta' && s.estatus !== 'atendida';
+  const esTrabajo = esGestor(req.usuario) && puedeTrabajar(req.usuario, s);
+  if (!esDueno && !esTrabajo) throw forbidden('No puedes eliminar este documento.');
+  try { await storageContratos.delete(d.ruta_archivo); } catch (err) { console.error('[arr-solicitudes] No se pudo borrar el archivo almacenado:', err.message); }
+  await query('DELETE FROM arr_solicitud_documentos WHERE id = $1', [d.id]);
+  await query('UPDATE arr_solicitudes SET updated_at = now() WHERE id = $1', [s.id]);
+  res.json({ documentos: await listarDocumentos(s.id) });
 }));
 
 module.exports = router;

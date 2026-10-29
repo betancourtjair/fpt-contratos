@@ -42,6 +42,7 @@ export default function DetalleSolicitudArrendamiento() {
   const [asignando, setAsignando] = useState(false);
   const [archivosNuevos, setArchivosNuevos] = useState([]);
   const [subiendo, setSubiendo] = useState(false);
+  const [subiendoDoc, setSubiendoDoc] = useState('');
 
   useEffect(() => {
     let activo = true;
@@ -105,6 +106,30 @@ export default function DetalleSolicitudArrendamiento() {
     } catch (err) { setError(err.message || 'No se pudieron subir los archivos.'); } finally { setSubiendo(false); }
   }
 
+  async function adjuntarDocumento(docId, e) {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    setSubiendoDoc(docId); setError(''); setAviso('');
+    try {
+      const fd = new FormData();
+      fd.append(docId, f);
+      const data = await api.post(`/arrendamientos/solicitudes/${id}/documentos-solicitante`, fd);
+      setDocumentos(unwrap(data, 'documentos') || []);
+      setAviso('Documento adjuntado.');
+    } catch (err) { setError(err.message || 'No se pudo adjuntar el documento.'); } finally { setSubiendoDoc(''); }
+  }
+
+  async function eliminarDocumento(doc) {
+    if (!window.confirm(`¿Eliminar "${doc.nombreArchivo}"? Esta acción no se puede deshacer.`)) return;
+    setError(''); setAviso('');
+    try {
+      const data = await api.del(`/arrendamientos/solicitudes/${id}/documentos/${doc.id}`);
+      setDocumentos(unwrap(data, 'documentos') || []);
+      setAviso('Documento eliminado.');
+    } catch (err) { setError(err.message || 'No se pudo eliminar el documento.'); }
+  }
+
   if (cargando) return <Spinner label="Cargando solicitud…" />;
   if (!solicitud) return <div className="alert alert-error">{error || 'Solicitud no encontrada.'}</div>;
 
@@ -112,6 +137,9 @@ export default function DetalleSolicitudArrendamiento() {
   const puedeTrabajar = gestiona && (puedeAsignar || solicitud.asignadoAId === usuario?.id);
   const docsRespuesta = documentos.filter((d) => d.campo === 'respuesta');
   const docsPor = (campo) => documentos.filter((d) => d.campo === campo);
+  const esDueno = solicitud.solicitanteId === usuario?.id;
+  const puedeAdjuntar = (esDueno && solicitud.estatus !== 'atendida') || puedeTrabajar;
+  const puedeEliminar = (doc) => puedeTrabajar || (esDueno && doc.campo !== 'respuesta' && solicitud.estatus !== 'atendida');
   const tramite = secciones[0]?.campos?.[0]?.opciones?.find((o) => o.value === solicitud.tipoTramite)?.label || solicitud.tipoTramite;
 
   return (
@@ -138,16 +166,31 @@ export default function DetalleSolicitudArrendamiento() {
               {campos.map((c) => (
                 <div key={c.id} style={{ display: 'contents' }}>
                   <dt><strong>{c.label}</strong></dt>
-                  <dd style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{valorLegible(c, datos[c.id])}</dd>
+                  <dd style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
+                    {/^https?:\/\//i.test(String(datos[c.id] || ''))
+                      ? <a href={datos[c.id]} target="_blank" rel="noreferrer">{datos[c.id]}</a>
+                      : valorLegible(c, datos[c.id])}
+                  </dd>
                 </div>
               ))}
               {docs.map((d) => (
                 <div key={d.id} style={{ display: 'contents' }}>
                   <dt><strong>{d.label}</strong></dt>
                   <dd style={{ margin: 0 }}>
-                    {docsPor(d.id).length === 0 ? '—' : docsPor(d.id).map((x) => (
-                      <div key={x.id}><a href={resolverUrl(x.url)} target="_blank" rel="noreferrer">{x.nombreArchivo}</a></div>
+                    {docsPor(d.id).length === 0 && (
+                      <div>{d.requerido ? <span className="badge badge-por_vencer">Pendiente</span> : '—'}</div>
+                    )}
+                    {docsPor(d.id).map((x) => (
+                      <div key={x.id}>
+                        <a href={resolverUrl(x.url)} target="_blank" rel="noreferrer">{x.nombreArchivo}</a>{' '}
+                        {puedeEliminar(x) && <button type="button" className="btn btn-ghost btn-sm" onClick={() => eliminarDocumento(x)}>Eliminar</button>}
+                      </div>
                     ))}
+                    {puedeAdjuntar && (
+                      <div style={{ marginTop: 4 }}>
+                        <input type="file" disabled={subiendoDoc === d.id} onChange={(e) => adjuntarDocumento(d.id, e)} />
+                      </div>
+                    )}
                   </dd>
                 </div>
               ))}
@@ -193,6 +236,7 @@ export default function DetalleSolicitudArrendamiento() {
               <li key={d.id}>
                 <a href={resolverUrl(d.url)} target="_blank" rel="noreferrer">{d.nombreArchivo}</a>
                 {venTodo && d.subidoPorNombre && <span className="page-header-sub"> · {d.subidoPorNombre}</span>}
+                {puedeEliminar(d) && <> <button type="button" className="btn btn-ghost btn-sm" onClick={() => eliminarDocumento(d)}>Eliminar</button></>}
               </li>
             ))}
           </ul>

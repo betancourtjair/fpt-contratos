@@ -5,9 +5,12 @@
 //
 // campo:     { id, label, tipo: text|textarea|number|date|select|radio|multicheck, opciones?,
 //              requerido?, visibleSi?: { campo, en: [valores] }, ayuda? }
-// documento: { id, label, requerido?, visibleSi? }
+// documento: { id, label, requerido? (esperado; no bloquea el envio), visibleSi? }
+// date: texto libre (admite "Pendiente de confirmar", "No aplica", etc.) con selector de fecha.
 
-const SI_NO = [{ value: 'si', label: 'Sí' }, { value: 'no', label: 'No' }];
+const PENDIENTE = { value: 'pendiente', label: 'Pendiente de confirmar' };
+const SI_NO = [{ value: 'si', label: 'Sí' }, { value: 'no', label: 'No' }, PENDIENTE];
+const APLICA = [{ value: 'aplica', label: 'Aplica' }, { value: 'no_aplica', label: 'No aplica' }];
 const NO_NUEVO = ['convenio', 'prorroga', 'cesion', 'terminacion', 'otro'];
 const MORAL = { campo: 'arrendadorTipoPersona', en: ['moral'] };
 const FISICA = { campo: 'arrendadorTipoPersona', en: ['fisica'] };
@@ -50,7 +53,7 @@ const SECCIONES = [
     id: 'arrendador',
     titulo: '2. Datos del Arrendador',
     campos: [
-      { id: 'arrendadorTipoPersona', label: 'Tipo de persona', tipo: 'select', requerido: true, opciones: [{ value: 'fisica', label: 'Persona física' }, { value: 'moral', label: 'Persona moral' }] },
+      { id: 'arrendadorTipoPersona', label: 'Tipo de persona', tipo: 'select', requerido: true, opciones: [{ value: 'fisica', label: 'Persona física' }, { value: 'moral', label: 'Persona moral' }, PENDIENTE] },
       {
         id: 'arrendadorCaracter', label: 'Carácter con el que interviene', tipo: 'select', requerido: true,
         opciones: [
@@ -60,6 +63,7 @@ const SECCIONES = [
           { value: 'administrador', label: 'Administrador' },
           { value: 'subarrendador', label: 'Subarrendador' },
           { value: 'otro', label: 'Otro' },
+          PENDIENTE,
         ],
       },
       { id: 'arrendadorCaracterOtro', label: 'Otro (especificar)', tipo: 'text', requerido: true, visibleSi: { campo: 'arrendadorCaracter', en: ['otro'] } },
@@ -106,6 +110,7 @@ const SECCIONES = [
       { id: 'inmuebleMunicipio', label: 'Municipio o alcaldía', tipo: 'text', requerido: true },
       { id: 'inmuebleCp', label: 'Código postal', tipo: 'text', requerido: true },
       { id: 'inmuebleEstado', label: 'Entidad federativa', tipo: 'text', requerido: true },
+      { id: 'inmuebleMapsUrl', label: 'Enlace de ubicación en Google Maps (ubicación exacta del inmueble)', tipo: 'text', ayuda: 'Pega el enlace de Google Maps que comparte el área de Expansión.' },
       { id: 'inmuebleObservaciones', label: 'Observaciones (copropiedad, usufructo, gravamen, limitación de dominio o autorización de un tercero, si se tiene conocimiento)', tipo: 'textarea' },
     ],
     documentos: [
@@ -130,10 +135,12 @@ const SECCIONES = [
       { id: 'periodoGracia', label: 'Período de gracia', tipo: 'text' },
       { id: 'vigencia', label: 'Vigencia', tipo: 'text', requerido: true },
       { id: 'prorrogas', label: 'Prórrogas', tipo: 'text' },
-      { id: 'rentaAdelantada', label: 'Renta adelantada', tipo: 'text' },
-      { id: 'fechaRentaAdelantada', label: 'Fecha de pago de renta adelantada', tipo: 'date' },
-      { id: 'depositoGarantia', label: 'Depósito en garantía', tipo: 'text' },
-      { id: 'fechaDepositoGarantia', label: 'Fecha de pago de depósito en garantía', tipo: 'date' },
+      { id: 'rentaAdelantadaAplica', label: 'Renta adelantada', tipo: 'radio', opciones: APLICA },
+      { id: 'rentaAdelantada', label: 'Renta adelantada: monto', tipo: 'text', visibleSi: { campo: 'rentaAdelantadaAplica', en: ['aplica'] } },
+      { id: 'fechaRentaAdelantada', label: 'Fecha de pago de renta adelantada', tipo: 'date', visibleSi: { campo: 'rentaAdelantadaAplica', en: ['aplica'] } },
+      { id: 'depositoGarantiaAplica', label: 'Depósito en garantía', tipo: 'radio', opciones: APLICA },
+      { id: 'depositoGarantia', label: 'Depósito en garantía: monto', tipo: 'text', visibleSi: { campo: 'depositoGarantiaAplica', en: ['aplica'] } },
+      { id: 'fechaDepositoGarantia', label: 'Fecha de pago de depósito en garantía', tipo: 'date', visibleSi: { campo: 'depositoGarantiaAplica', en: ['aplica'] } },
       { id: 'fechaEntregaLocal', label: 'Fecha de entrega del local', tipo: 'date' },
       { id: 'estacionamiento', label: 'Estacionamiento (no. de cajones y tarifa preferencial, u otro esquema)', tipo: 'textarea' },
       { id: 'horarioOperacion', label: 'Horario de operación', tipo: 'text' },
@@ -179,10 +186,6 @@ function validar(entrada, idsDocumentos) {
           errores.push(`${c.label}: valor no valido.`);
           continue;
         }
-        if (v && c.tipo === 'date' && Number.isNaN(Date.parse(v))) {
-          errores.push(`${c.label}: fecha no valida.`);
-          continue;
-        }
         if (v.length > 4000) v = v.slice(0, 4000);
       }
       if (vacio(v)) {
@@ -192,13 +195,8 @@ function validar(entrada, idsDocumentos) {
       datos[c.id] = v;
     }
   }
-  for (const sec of SECCIONES) {
-    for (const d of sec.documentos || []) {
-      if (visible(d, datos) && d.requerido && !idsDocumentos.includes(d.id)) {
-        errores.push(`Adjunta: ${d.label}.`);
-      }
-    }
-  }
+  // Los documentos ya no bloquean el envio: al inicio del proceso puede faltar alguno. Los
+  // marcados como `requerido` se muestran como "Pendiente" en el detalle hasta que se adjunten.
   return { datos, errores };
 }
 

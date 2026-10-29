@@ -5,6 +5,7 @@ import Spinner from '../../components/Spinner.jsx';
 import { esVisible } from './solicitudesConfig.jsx';
 
 const MAX_MB = 40;
+const RAPIDOS = ['Pendiente de confirmar', 'No disponible', 'No aplica'];
 
 function Campo({ c, valor, onChange }) {
   const id = `f-${c.id}`;
@@ -45,9 +46,27 @@ function Campo({ c, valor, onChange }) {
       <label htmlFor={id}>{c.label}{obligatorio}</label>
       {c.tipo === 'textarea' ? (
         <textarea id={id} rows={3} value={valor || ''} onChange={(e) => onChange(e.target.value)} />
+      ) : c.tipo === 'date' ? (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input id={id} type="text" style={{ flex: 1 }} placeholder="dd/mm/aaaa o texto libre (p. ej. Pendiente de confirmar)" value={valor || ''} onChange={(e) => onChange(e.target.value)} />
+          <input
+            type="date"
+            aria-label={`Elegir fecha: ${c.label}`}
+            title="Elegir fecha del calendario"
+            style={{ width: 150 }}
+            value=""
+            onChange={(e) => { if (e.target.value) { const [y, m, d] = e.target.value.split('-'); onChange(`${d}/${m}/${y}`); } }}
+          />
+        </div>
       ) : (
-        <input id={id} type={c.tipo === 'date' ? 'date' : 'text'} value={valor || ''} onChange={(e) => onChange(e.target.value)} />
+        <input id={id} type="text" value={valor || ''} onChange={(e) => onChange(e.target.value)} />
       )}
+      {c.ayuda && <small className="hint">{c.ayuda}</small>}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+        {RAPIDOS.map((t) => (
+          <button key={t} type="button" className="btn btn-ghost btn-sm" onClick={() => onChange(t)}>{t}</button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -91,9 +110,6 @@ export default function NuevaSolicitudArrendamiento() {
         const v = datos[c.id];
         if (v === undefined || v === null || (Array.isArray(v) ? v.length === 0 : String(v).trim() === '')) faltan.push(c.label);
       }
-      for (const d of s.documentos || []) {
-        if (esVisible(d, datos) && d.requerido && !archivos[d.id]) faltan.push(`Adjuntar: ${d.label}`);
-      }
     }
     return faltan;
   }
@@ -134,7 +150,7 @@ export default function NuevaSolicitudArrendamiento() {
       <div className="page-header">
         <div>
           <h1>Solicitud de contrato de Arrendamiento</h1>
-          <p className="page-header-sub">Llena la información y adjunta los documentos para iniciar el trámite con Jurídico. Los campos con * son obligatorios.</p>
+          <p className="page-header-sub">Llena la información para iniciar el trámite con Jurídico. Los campos con * son obligatorios, pero si todavía no tienes el dato puedes escribir "Pendiente de confirmar", "No disponible" o "No aplica". Los documentos pueden quedar pendientes y adjuntarse después desde la solicitud.</p>
         </div>
         <Link to="/arrendamientos/solicitudes" className="btn btn-secondary">Cancelar</Link>
       </div>
@@ -152,9 +168,14 @@ export default function NuevaSolicitudArrendamiento() {
                 <div className="field-group-title">Documentos</div>
                 {s.documentos.filter((d) => esVisible(d, datos)).map((d) => (
                   <div className="field" key={d.id}>
-                    <label htmlFor={`d-${d.id}`}>{d.label}{d.requerido ? ' *' : ''}</label>
+                    <label htmlFor={`d-${d.id}`}>{d.label}{d.requerido ? ' (se espera adjuntar)' : ''}</label>
                     <input id={`d-${d.id}`} type="file" onChange={(e) => elegirArchivo(d.id, e)} />
-                    {archivos[d.id] && <small className="hint">{archivos[d.id].name} ({(archivos[d.id].size / 1024 / 1024).toFixed(1)} MB)</small>}
+                    {archivos[d.id] && (
+                      <small className="hint">
+                        {archivos[d.id].name} ({(archivos[d.id].size / 1024 / 1024).toFixed(1)} MB){' '}
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => { const i = document.getElementById(`d-${d.id}`); if (i) i.value = ''; elegirArchivo(d.id, { target: { files: [] } }); }}>Quitar</button>
+                      </small>
+                    )}
                   </div>
                 ))}
               </div>
