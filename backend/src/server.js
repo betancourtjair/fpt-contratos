@@ -34,6 +34,7 @@ const arrendamientosContactsRoutes = require('./routes/arrendamientos/contacts')
 const arrendamientosEventsRoutes = require('./routes/arrendamientos/events');
 const arrendamientosDashboardRoutes = require('./routes/arrendamientos/dashboard');
 const arrendamientosRentasRoutes = require('./routes/arrendamientos/rentas');
+const arrendamientosSolicitudesRoutes = require('./routes/arrendamientos/solicitudes');
 const arrendamientosDocumentosRoutes = require('./routes/arrendamientos/documentos');
 
 const app = express();
@@ -87,6 +88,7 @@ app.use('/api/arrendamientos/contacts', arrendamientosContactsRoutes);
 app.use('/api/arrendamientos/events', arrendamientosEventsRoutes);
 app.use('/api/arrendamientos/dashboard', arrendamientosDashboardRoutes);
 app.use('/api/arrendamientos/rentas', arrendamientosRentasRoutes);
+app.use('/api/arrendamientos/solicitudes', arrendamientosSolicitudesRoutes);
 // arrendamientosDocumentosRoutes define sus propias rutas completas (/locations/:locationId/documentos, etc.)
 app.use('/api/arrendamientos', arrendamientosDocumentosRoutes);
 

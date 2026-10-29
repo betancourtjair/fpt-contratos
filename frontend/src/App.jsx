@@ -21,6 +21,9 @@ import NuevaSolicitudOperaciones from './pages/operaciones/NuevaSolicitudOperaci
 import ListaSolicitudesOperaciones from './pages/operaciones/ListaSolicitudesOperaciones.jsx';
 import DetalleSolicitudOperaciones from './pages/operaciones/DetalleSolicitudOperaciones.jsx';
 import CambiarPassword from './pages/CambiarPassword.jsx';
+import SolicitudesArrendamiento from './pages/arrendamientos/SolicitudesArrendamiento.jsx';
+import NuevaSolicitudArrendamiento from './pages/arrendamientos/NuevaSolicitudArrendamiento.jsx';
+import DetalleSolicitudArrendamiento from './pages/arrendamientos/DetalleSolicitudArrendamiento.jsx';
 import DashboardArrendamientos from './pages/arrendamientos/DashboardArrendamientos.jsx';
 import Locations from './pages/arrendamientos/Locations.jsx';
 import LocationDetalle from './pages/arrendamientos/LocationDetalle.jsx';
@@ -159,6 +162,9 @@ export default function App() {
             página con useAuth().esAdmin (mismo nivel que el resto de la app: super_admin/
             admin/ceo/cfo/cabeza_juridico). */}
         <Route path="arrendamientos" element={<DashboardArrendamientos />} />
+        <Route path="arrendamientos/solicitudes" element={<SolicitudesArrendamiento />} />
+        <Route path="arrendamientos/solicitudes/nueva" element={<NuevaSolicitudArrendamiento />} />
+        <Route path="arrendamientos/solicitudes/:id" element={<DetalleSolicitudArrendamiento />} />
         <Route path="arrendamientos/ubicaciones" element={<Locations />} />
         <Route path="arrendamientos/ubicaciones/:id" element={<LocationDetalle />} />
         <Route path="arrendamientos/leases" element={<Leases />} />

@@ -201,6 +201,8 @@ export default function Layout() {
               onToggle={toggleSeccion}
             >
               <NavItem to="/arrendamientos" end>Dashboard</NavItem>
+              <NavItem to="/arrendamientos/solicitudes/nueva">Nueva solicitud</NavItem>
+              <NavItem to="/arrendamientos/solicitudes" end>Solicitudes</NavItem>
               <NavItem to="/arrendamientos/ubicaciones">Ubicaciones</NavItem>
               <NavItem to="/arrendamientos/leases">Leases</NavItem>
               {puedeVerRentas && <NavItem to="/arrendamientos/rentas">Rentas</NavItem>}
